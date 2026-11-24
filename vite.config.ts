@@ -13,7 +13,8 @@ const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 
 export default defineConfig({
   base,
   define: {
-    __APP_VERSION__: JSON.stringify(pkg.version),
+    // APP_BUILD_TAG yalnızca güncelleme testinde farklı bir sürüm üretmek için kullanılır.
+    __APP_VERSION__: JSON.stringify(pkg.version + (process.env.APP_BUILD_TAG ? `-${process.env.APP_BUILD_TAG}` : '')),
   },
   plugins: [
     react(),

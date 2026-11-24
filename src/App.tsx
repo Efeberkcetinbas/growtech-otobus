@@ -6,7 +6,7 @@ import { Toaster } from './components/Toaster';
 import { Button } from './components/ui';
 import { useAppData } from './hooks/useAppData';
 import { db } from './lib/db';
-import { toast } from './lib/notify';
+import { isWriteActive, toast } from './lib/notify';
 import { ensureDefaults } from './lib/repo';
 import { compareTr } from './lib/text';
 import { AttendanceScreen } from './screens/AttendanceScreen';
@@ -16,6 +16,8 @@ import { ParticipantsScreen } from './screens/ParticipantsScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 
 type Tab = 'participants' | 'bus' | 'attendance' | 'settings';
+const UPDATE_CHECK_MS = 30 * 60 * 1000;
+const UPDATED_FLAG = 'growtech-updated';
 const TABS: { id: Tab; label: string; icon: typeof Users }[] = [
   { id: 'participants', label: 'Katılımcılar', icon: Users },
   { id: 'bus', label: 'Otobüsüm', icon: Bus },
@@ -66,7 +68,50 @@ export default function App() {
     onOfflineReady() {
       toast('Uygulama çevrimdışı kullanıma hazır', 'success');
     },
+    // Yeni sürümü yalnızca tarayıcının zamanlamasına bırakma: açılışta, uygulama öne
+    // geldiğinde ve 30 dakikada bir sunucuda yeni sürüm var mı diye kontrol et.
+    onRegisteredSW(_url, reg) {
+      if (!reg) return;
+      const check = () => {
+        if (navigator.onLine) reg.update().catch(() => undefined);
+      };
+      check();
+      setInterval(check, UPDATE_CHECK_MS);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') check();
+      });
+    },
   });
+
+  // Yeni sürüm bulunduğunda açık form/pencere yoksa otomatik uygula.
+  // Tüm kayıtlar IndexedDB'de olduğu için yeniden yükleme veri kaybettirmez.
+  useEffect(() => {
+    if (!needRefresh) return;
+    const tryApply = () => {
+      if (document.querySelector('[role="dialog"]') || isWriteActive()) return false;
+      try {
+        sessionStorage.setItem(UPDATED_FLAG, '1');
+      } catch {
+        /* yalnızca bildirim için */
+      }
+      void updateServiceWorker(true);
+      return true;
+    };
+    if (tryApply()) return;
+    const t = setInterval(() => tryApply() && clearInterval(t), 2000);
+    return () => clearInterval(t);
+  }, [needRefresh, updateServiceWorker]);
+
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(UPDATED_FLAG)) {
+        sessionStorage.removeItem(UPDATED_FLAG);
+        toast(`Uygulama güncellendi (v${__APP_VERSION__}). Kayıtlarınız korundu.`);
+      }
+    } catch {
+      /* yalnızca bildirim için */
+    }
+  }, []);
 
   useEffect(() => {
     db.open()
@@ -134,7 +179,7 @@ export default function App() {
       {needRefresh && (
         <div className="mx-3 mt-3 flex items-center gap-2 rounded-2xl bg-brand-50 p-3 text-sm text-brand-900 ring-1 ring-brand-600/30">
           <RefreshCw className="h-5 w-5 shrink-0" />
-          <p className="flex-1">Yeni sürüm hazır. Kayıtlarınız korunur.</p>
+          <p className="flex-1">Yeni sürüm hazır; açık pencere kapanınca otomatik yüklenecek. Kayıtlarınız korunur.</p>
           <Button variant="primary" className="text-sm" onClick={() => void updateServiceWorker(true)}>
             Güncelle
           </Button>

@@ -82,7 +82,7 @@ Ana ekrandan açılan uygulama tam ekran çalışır ve tarayıcının kayıtlar
 
 ## Çevrimdışı çalışma
 
-İlk açılışta uygulama dosyaları telefona önbelleklenir (“Uygulama çevrimdışı kullanıma hazır” bildirimi). Sonrasında internet olmadan da arama, kişi ekleme/düzeltme, otobüs listesi ve yoklama çalışır; her şey cihazda kaydedilir. Yeni sürüm yayınlandığında “Güncelle” düğmesi çıkar; güncelleme kayıtlarınızı silmez.
+İlk açılışta uygulama dosyaları telefona önbelleklenir (“Uygulama çevrimdışı kullanıma hazır” bildirimi). Sonrasında internet olmadan da arama, kişi ekleme/düzeltme, otobüs listesi ve yoklama çalışır; her şey cihazda kaydedilir. Uygulama açılışta, telefonda tekrar öne geldiğinde ve 30 dakikada bir yeni sürüm olup olmadığını kontrol eder. Yeni sürüm bulunursa, açık bir form/pencere yoksa kendiliğinden yüklenir (“Uygulama güncellendi” bildirimi); form açıksa siz kapatınca yüklenir. Güncelleme kayıtlarınızı silmez.
 
 ## Yerel veri saklama sınırlamaları
 

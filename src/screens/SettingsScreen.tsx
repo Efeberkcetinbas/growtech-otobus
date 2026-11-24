@@ -223,7 +223,7 @@ export function SettingsScreen({ data, onImport, offlineReady }: { data: AppData
         </p>
       </Card>
 
-      <p className="px-2 pb-2 text-center text-xs text-slate-500">
+      <p className="px-2 pb-2 text-center text-xs text-slate-500" data-testid="app-version">
         GROWTECH 2026 · Aydın Ticaret Borsası · Otobüs Yolcu ve Yoklama Sistemi · v{__APP_VERSION__}
       </p>
 
