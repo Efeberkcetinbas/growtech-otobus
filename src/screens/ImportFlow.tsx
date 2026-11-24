@@ -68,7 +68,10 @@ export function ImportFlow({ onClose, onDone }: { onClose: () => void; onDone: (
     setStage('applying');
     try {
       const r = await applyImport(plan, decisions, fileName);
-      toast(`İçe aktarıldı: ${r.created} yeni, ${r.updated + r.conflictsReplaced} güncellendi, ${r.unchanged + r.conflictsKept} korundu`);
+      toast(
+        `İçe aktarıldı: ${r.created} yeni, ${r.updated + r.conflictsReplaced} güncellendi, ${r.unchanged + r.conflictsKept} korundu` +
+          (r.skippedDeleted ? `, ${r.skippedDeleted} silinmiş kişi eklenmedi` : ''),
+      );
       onDone();
     } catch {
       setStage('plan');
@@ -407,6 +410,7 @@ function PlanView({ plan, decisions, setDecisions }: { plan: ImportPlan; decisio
   const count = (k: string) => plan.items.filter((i) => i.kind === k).length;
   const conflicts = plan.items.filter((i) => i.kind === 'conflict');
   const dups = plan.items.filter((i) => i.kind === 'duplicate');
+  const deleted = plan.items.filter((i) => i.kind === 'deleted');
   const set = (key: string, val: Decisions extends Map<string, infer V> ? V : never) => setDecisions(new Map(decisions).set(key, val));
   return (
     <div className="space-y-3">
@@ -421,7 +425,19 @@ function PlanView({ plan, decisions, setDecisions }: { plan: ImportPlan; decisio
         <Stat label="Çakışma (onayınız gerekli)" value={conflicts.length} tone="warn" />
         <Stat label="Olası mükerrer" value={dups.length} tone="warn" />
         <Stat label="Yeni Excel’de olmayan (silinmez)" value={plan.missing.length} />
+        <Stat label="Daha önce silinmiş (geri eklenmez)" value={deleted.length} testId="plan-deleted" />
       </div>
+
+      {deleted.length > 0 && (
+        <Section title="Daha önce sildiğiniz kişiler" count={deleted.length}>
+          <p className="text-sm text-slate-600">Bu kişiler Excel’de yer alsa da geri eklenmez. Gerekirse Ayarlar → Silinen katılımcılar bölümünden geri getirebilirsiniz.</p>
+          {deleted.map((d) => (
+            <p key={d.incoming.person.sourceKey} className="text-sm">
+              {d.incoming.person.fullName} <span className="text-slate-500">· {d.incoming.row.company}</span>
+            </p>
+          ))}
+        </Section>
+      )}
 
       {conflicts.length > 0 && (
         <Section title="Çakışmalar" count={conflicts.length} defaultOpen tone="warn">

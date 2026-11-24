@@ -27,7 +27,7 @@ export default defineConfig({
     {
       name: 'iphone-webkit',
       use: { ...devices['iPhone 13'] },
-      testMatch: /(core|layout)\.spec\.ts/,
+      testMatch: /(core|layout|delete)\.spec\.ts/,
     },
   ],
   webServer: {

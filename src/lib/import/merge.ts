@@ -48,7 +48,9 @@ export type PlanItem =
   | { kind: 'unchanged'; incoming: IncomingPerson; existing: Person }
   | { kind: 'update'; incoming: IncomingPerson; existing: Person; changes: (keyof ImportSnapshot)[] }
   | { kind: 'conflict'; incoming: IncomingPerson; existing: Person; changes: (keyof ImportSnapshot)[] }
-  | { kind: 'duplicate'; incoming: IncomingPerson; candidates: Person[] };
+  | { kind: 'duplicate'; incoming: IncomingPerson; candidates: Person[] }
+  /** Kullanıcı bu kişiyi daha önce silmiş: otomatik olarak geri eklenmez. */
+  | { kind: 'deleted'; incoming: IncomingPerson; existing: Person };
 
 export interface ImportPlan {
   items: PlanItem[];
@@ -105,7 +107,7 @@ function current(p: Person): ImportSnapshot {
 /** Yeni Excel verisini mevcut kayıtlarla karşılaştırır; hiçbir şeyi değiştirmez. */
 export function planImport(incoming: IncomingPerson[], existing: Person[]): ImportPlan {
   const bySource = new Map(existing.filter((p) => p.sourceKey).map((p) => [p.sourceKey!, p]));
-  const manual = existing.filter((p) => !p.sourceKey);
+  const manual = existing.filter((p) => !p.sourceKey && !p.deletedAt);
   const seen = new Set<string>();
   const items: PlanItem[] = [];
   for (const inc of incoming) {
@@ -121,13 +123,17 @@ export function planImport(incoming: IncomingPerson[], existing: Person[]): Impo
       items.push(candidates.length ? { kind: 'duplicate', incoming: inc, candidates } : { kind: 'new', incoming: inc });
       continue;
     }
+    if (ex.deletedAt) {
+      items.push({ kind: 'deleted', incoming: inc, existing: ex });
+      continue;
+    }
     const excelChanges = ex.importSnapshot ? diff(ex.importSnapshot, inc.snapshot) : diff(current(ex), inc.snapshot);
     const vsCurrent = diff(current(ex), inc.snapshot);
     if (excelChanges.length === 0 || vsCurrent.length === 0) items.push({ kind: 'unchanged', incoming: inc, existing: ex });
     else if (ex.edited) items.push({ kind: 'conflict', incoming: inc, existing: ex, changes: vsCurrent });
     else items.push({ kind: 'update', incoming: inc, existing: ex, changes: vsCurrent });
   }
-  const missing = existing.filter((p) => p.source === 'excel' && p.sourceKey && !seen.has(p.sourceKey));
+  const missing = existing.filter((p) => p.source === 'excel' && p.sourceKey && !p.deletedAt && !seen.has(p.sourceKey));
   return { items, missing };
 }
 
@@ -142,6 +148,8 @@ export interface ApplyResult {
   conflictsReplaced: number;
   linked: number;
   markedMissing: number;
+  /** Daha önce silindiği için geri eklenmeyen kişiler. */
+  skippedDeleted: number;
   snapshotId: number;
 }
 
@@ -156,7 +164,7 @@ const IMPORT_FLAGS: Flag[] = [
  */
 export async function applyImport(plan: ImportPlan, decisions: Decisions, fileName: string): Promise<ApplyResult> {
   const snapshotId = await guarded('Excel öncesi kopya', () => saveSnapshot(`Excel yükleme öncesi otomatik kopya (${fileName})`));
-  const res: ApplyResult = { created: 0, updated: 0, unchanged: 0, conflictsKept: 0, conflictsReplaced: 0, linked: 0, markedMissing: 0, snapshotId };
+  const res: ApplyResult = { created: 0, updated: 0, unchanged: 0, conflictsKept: 0, conflictsReplaced: 0, linked: 0, markedMissing: 0, skippedDeleted: 0, snapshotId };
   const now = Date.now();
   await guarded('Excel içe aktarma', () =>
     db.transaction('rw', db.persons, db.settings, async () => {
@@ -182,7 +190,9 @@ export async function applyImport(plan: ImportPlan, decisions: Decisions, fileNa
       });
       for (const item of plan.items) {
         const key = item.incoming.person.sourceKey;
-        if (item.kind === 'new') {
+        if (item.kind === 'deleted') {
+          res.skippedDeleted++;
+        } else if (item.kind === 'new') {
           await db.persons.add(fromExcel(item.incoming));
           res.created++;
         } else if (item.kind === 'update') {

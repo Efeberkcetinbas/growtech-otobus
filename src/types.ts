@@ -79,6 +79,12 @@ export interface Person {
   flags: Flag[];
   /** Excel satır numarası (bilgi amaçlı). */
   sourceRow?: number;
+  /**
+   * Silinme zamanı. Silinen kişi listelerde görünmez ama kayıt (silinme işareti olarak)
+   * saklanır: geçmiş yoklama kayıtları anlamını korur ve yeni Excel yüklemesinde
+   * aynı kişi otomatik olarak geri eklenmez.
+   */
+  deletedAt?: number;
   createdAt: number;
   updatedAt: number;
 }

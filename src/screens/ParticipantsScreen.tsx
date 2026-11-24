@@ -1,5 +1,6 @@
 import { Check, FileSpreadsheet, Pencil, Plus, UserPlus, Users } from 'lucide-react';
 import { useDeferredValue, useMemo, useState } from 'react';
+import { DeleteButton, DeletePersonDialog } from '../components/DeletePerson';
 import { CallButton, FlagBadges, MetaLines, PhoneLine } from '../components/PersonBits';
 import { needsCheck } from '../lib/person';
 import { Button, Chip, EmptyState, SearchBox } from '../components/ui';
@@ -18,6 +19,7 @@ export function ParticipantsScreen({ data, onEdit, onNew, onImport }: { data: Ap
   const [filter, setFilter] = useState<Filter>('all');
   const [boarding, setBoarding] = useState('');
   const [limit, setLimit] = useState(RENDER_STEP);
+  const [toDelete, setToDelete] = useState<Person | null>(null);
   const deferred = useDeferredValue(query);
 
   const indexed = useMemo(
@@ -133,13 +135,18 @@ export function ParticipantsScreen({ data, onEdit, onNew, onImport }: { data: Ap
                 {p.note && <p className="text-sm break-words text-slate-500">{p.note}</p>}
                 <FlagBadges flags={p.flags} />
               </div>
-              <div className="mt-2.5 grid grid-cols-[1fr_auto_auto] gap-2">
+              <div className="mt-2.5 grid grid-cols-3 gap-2 min-[360px]:grid-cols-[1fr_auto_auto_auto]">
                 {onBus ? (
-                  <Button variant="success" aria-disabled="true" className="cursor-default" onClick={() => toast(`${p.fullName} zaten otobüsünüzde`, 'info')}>
+                  <Button
+                    variant="success"
+                    aria-disabled="true"
+                    className="col-span-3 cursor-default min-[360px]:col-span-1"
+                    onClick={() => toast(`${p.fullName} zaten otobüsünüzde`, 'info')}
+                  >
                     <Check className="h-5 w-5" /> Otobüsümde
                   </Button>
                 ) : (
-                  <Button variant="primary" onClick={() => add(p)}>
+                  <Button variant="primary" className="col-span-3 min-[360px]:col-span-1" onClick={() => add(p)}>
                     <Plus className="h-5 w-5" /> Otobüsüme ekle
                   </Button>
                 )}
@@ -148,6 +155,7 @@ export function ParticipantsScreen({ data, onEdit, onNew, onImport }: { data: Ap
                   <Pencil className="h-5 w-5" />
                   <span className="sr-only sm:not-sr-only">Düzelt</span>
                 </Button>
+                <DeleteButton person={p} onClick={() => setToDelete(p)} />
               </div>
             </li>
           );
@@ -158,6 +166,7 @@ export function ParticipantsScreen({ data, onEdit, onNew, onImport }: { data: Ap
           Daha fazla göster ({list.length - limit})
         </Button>
       )}
+      {toDelete && <DeletePersonDialog person={toDelete} onBus={data.busIds.has(toDelete.id)} onClose={() => setToDelete(null)} />}
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { callTarget } from '../lib/person';
 import { formatPhone, telHref } from '../lib/phone';
 import { FLAG_LABELS, VERIFY_FLAGS, type Flag, type Person } from '../types';
 
-export function CallButton({ person, compact = false }: { person: Person; compact?: boolean }) {
+export function CallButton({ person, compact = false, labelClassName = '' }: { person: Person; compact?: boolean; labelClassName?: string }) {
   const target = callTarget(person);
   if (!target) {
     return (
@@ -12,7 +12,7 @@ export function CallButton({ person, compact = false }: { person: Person; compac
         aria-label="Telefon numarası yok"
       >
         <PhoneOff className="h-5 w-5" />
-        {!compact && 'Numara yok'}
+        {!compact && <span className={labelClassName}>Numara yok</span>}
       </span>
     );
   }
@@ -23,7 +23,7 @@ export function CallButton({ person, compact = false }: { person: Person; compac
       className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-xl border border-brand-600/50 bg-white px-3 text-[15px] font-semibold text-brand-600 active:bg-brand-50"
     >
       <Phone className="h-5 w-5" />
-      {!compact && 'Ara'}
+      {!compact && <span className={labelClassName}>Ara</span>}
     </a>
   );
 }

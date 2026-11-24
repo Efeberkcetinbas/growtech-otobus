@@ -12,7 +12,8 @@ export interface BusEntry {
 
 /** Tüm ekranların okuduğu tek veri kaynağı (IndexedDB canlı sorguları). */
 export function useAppData() {
-  const persons = useLiveQuery(() => db.persons.toArray(), []);
+  // Silinen kişiler (silinme işaretli kayıtlar) hiçbir ekranda ve sayaçta yer almaz.
+  const persons = useLiveQuery(() => db.persons.filter((p) => !p.deletedAt).toArray(), []);
   const bus = useLiveQuery(() => db.bus.orderBy('addedAt').toArray(), []);
   const sessions = useLiveQuery(() => db.sessions.orderBy('order').toArray(), []);
   const activeSetting = useLiveQuery(async () => ((await db.settings.get('activeSessionId'))?.value as string | undefined) ?? null, []);

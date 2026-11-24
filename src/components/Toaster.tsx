@@ -8,7 +8,7 @@ export function Toaster() {
     () =>
       onToast((t) => {
         setItems((cur) => [...cur.slice(-2), t]);
-        const ms = t.kind === 'error' ? 7000 : t.action ? 5000 : 2500;
+        const ms = t.duration ?? (t.kind === 'error' ? 7000 : t.action ? 5000 : 2500);
         setTimeout(() => setItems((cur) => cur.filter((x) => x.id !== t.id)), ms);
       }),
     [],

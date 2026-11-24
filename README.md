@@ -46,6 +46,16 @@ Ana ekrandan açılan uygulama tam ekran çalışır ve tarayıcının kayıtlar
 - Listede olmayan kişi için **Yeni Katılımcı**: ad soyad zorunlu; telefon, firma, biniş yeri, açıklama isteğe bağlı. “Doğrudan otobüsüme ekle” varsayılan olarak açıktır. Benzer isim veya aynı telefon varsa uyarı verilir (ortak telefon kullanan farklı kişiler yine de eklenebilir).
 - **Düzelt** ile bilgiler değiştirilebilir; değişiklik Otobüsüm ve Yoklama ekranlarına anında yansır.
 
+## Katılımcı silme
+
+- Her katılımcının **Düzelt** düğmesinin yanında kırmızı çöp kutusu ikonlu **Sil** düğmesi vardır (Katılımcılar ve Otobüsüm ekranları). Excel’den gelen ve elle eklenen tüm kişiler silinebilir.
+- Silmeden önce kişinin adını gösteren bir onay penceresi açılır.
+- Onaylanınca kişi katılımcı listesinden ve otobüs listesinden kaldırılır; yoklama listeleri ve sayaçlar anında güncellenir. Aynı firmadan gelen diğer kişiler etkilenmez.
+- Geçmiş yoklama kayıtları silinmez. Silme işlemi cihaza kalıcı kaydedilir, çevrimdışı da çalışır; uygulama yeniden açıldığında kişi geri gelmez.
+- Yeni Excel yüklendiğinde daha önce silinen kişiler **otomatik olarak geri eklenmez** (önizlemede “Daha önce silinmiş” olarak sayılır).
+- Yanlışlıkla silerseniz **10 saniye** içinde bildirimdeki **Geri al**’a dokunun; kişi otobüsteki eski sırasıyla geri gelir. Daha sonra fark ederseniz **Ayarlar → Silinen katılımcılar** bölümünden geri getirebilirsiniz.
+- Otobüsüm ekranındaki **Çıkar** düğmesi yalnızca kişiyi otobüsten çıkarır; katılımcı kaydını silmez.
+
 ## Otobüs listesi oluşturma
 
 - Katılımcı kartındaki **Otobüsüme ekle** → düğme **Otobüsümde** olur; aynı kişi iki kez eklenemez.

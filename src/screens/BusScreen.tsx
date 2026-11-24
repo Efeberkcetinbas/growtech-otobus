@@ -1,5 +1,6 @@
 import { Bus, Copy, Download, Pencil, Share2, Trash2, UserMinus } from 'lucide-react';
 import { useDeferredValue, useMemo, useState } from 'react';
+import { DeleteButton, DeletePersonDialog } from '../components/DeletePerson';
 import { CallButton, FlagBadges, MetaLines, PhoneLine } from '../components/PersonBits';
 import { Button, ConfirmDialog, EmptyState, SearchBox } from '../components/ui';
 import type { AppData, BusEntry } from '../hooks/useAppData';
@@ -25,6 +26,7 @@ export function BusScreen({ data, onEdit, goParticipants }: { data: AppData; onE
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<Sort>('added');
   const [confirmClear, setConfirmClear] = useState(false);
+  const [toDelete, setToDelete] = useState<Person | null>(null);
   const deferred = useDeferredValue(query);
 
   const sorted = useMemo(() => sortEntries(data.busEntries, sort), [data.busEntries, sort]);
@@ -36,7 +38,7 @@ export function BusScreen({ data, onEdit, goParticipants }: { data: AppData; onE
   async function remove(p: Person) {
     try {
       await removeFromBus(p.id);
-      toast(`${p.fullName} listeden çıkarıldı`, 'info', { label: 'Geri al', run: () => void addToBus(p.id) });
+      toast(`${p.fullName} otobüsten çıkarıldı (katılımcı listesinde duruyor)`, 'info', { label: 'Geri al', run: () => void addToBus(p.id) });
     } catch {
       /* guarded bildirir */
     }
@@ -131,11 +133,14 @@ export function BusScreen({ data, onEdit, goParticipants }: { data: AppData; onE
                 <FlagBadges flags={p.flags} />
               </div>
               <div className="mt-2.5 flex flex-wrap gap-2">
-                <CallButton person={p} />
+                <CallButton person={p} labelClassName="sr-only min-[360px]:not-sr-only" />
                 <Button aria-label={`${p.fullName} bilgilerini düzelt`} onClick={() => onEdit(p)}>
-                  <Pencil className="h-5 w-5" /> Düzelt
+                  <Pencil className="h-5 w-5" />
+                  <span className="sr-only min-[360px]:not-sr-only">Düzelt</span>
                 </Button>
-                <Button variant="danger" aria-label={`${p.fullName} listeden çıkar`} onClick={() => remove(p)}>
+                <DeleteButton person={p} onClick={() => setToDelete(p)} />
+                {/* Yalnızca otobüsten çıkarır; katılımcı kaydı silinmez */}
+                <Button aria-label={`${p.fullName} listeden çıkar`} onClick={() => remove(p)}>
                   <UserMinus className="h-5 w-5" />
                   <span className="sr-only min-[360px]:not-sr-only">Çıkar</span>
                 </Button>
@@ -148,6 +153,8 @@ export function BusScreen({ data, onEdit, goParticipants }: { data: AppData; onE
       <Button variant="danger" className="mt-4 w-full" onClick={() => setConfirmClear(true)}>
         <Trash2 className="h-5 w-5" /> Tüm otobüs listesini temizle
       </Button>
+
+      {toDelete && <DeletePersonDialog person={toDelete} onBus onClose={() => setToDelete(null)} />}
 
       {confirmClear && (
         <ConfirmDialog

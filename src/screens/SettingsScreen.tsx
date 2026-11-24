@@ -1,12 +1,12 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { AlertTriangle, Database, Download, FileSpreadsheet, HardDrive, History, ShieldCheck, Upload, WifiOff } from 'lucide-react';
+import { AlertTriangle, Database, Download, FileSpreadsheet, HardDrive, History, RotateCcw, ShieldCheck, Trash2, Upload, WifiOff } from 'lucide-react';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Button, ConfirmDialog } from '../components/ui';
 import type { AppData } from '../hooks/useAppData';
 import { db } from '../lib/db';
 import { downloadJson } from '../lib/export';
 import { toast } from '../lib/notify';
-import { exportBackup, restoreBackup, validateBackup } from '../lib/repo';
+import { exportBackup, restoreBackup, restorePerson, validateBackup } from '../lib/repo';
 import type { BackupData } from '../types';
 
 const backupName = () => `growtech-yedek-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`;
@@ -47,6 +47,7 @@ function useStorageStatus() {
 export function SettingsScreen({ data, onImport, offlineReady }: { data: AppData; onImport: () => void; offlineReady: boolean }) {
   const lastImport = useLiveQuery(async () => (await db.settings.get('lastImport'))?.value as { at: number; fileName: string; people: number } | undefined, []);
   const snapshots = useLiveQuery(() => db.snapshots.orderBy('createdAt').reverse().toArray(), []);
+  const deleted = useLiveQuery(async () => (await db.persons.filter((p) => !!p.deletedAt).toArray()).sort((a, b) => b.deletedAt! - a.deletedAt!), []);
   const { persisted, usage, refresh } = useStorageStatus();
   const [pending, setPending] = useState<{ data: BackupData; label: string } | null>(null);
   const [error, setError] = useState('');
@@ -144,7 +145,7 @@ export function SettingsScreen({ data, onImport, offlineReady }: { data: AppData
                 <div className="min-w-0 flex-1 text-sm">
                   <p className="font-semibold">{new Date(s.createdAt).toLocaleString('tr-TR')}</p>
                   <p className="break-words text-slate-600">
-                    {s.reason} · {s.data.persons.length} kişi · {s.data.bus.length} yolcu
+                    {s.reason} · {s.data.persons.filter((p) => !p.deletedAt).length} kişi · {s.data.bus.length} yolcu
                   </p>
                 </div>
                 <Button className="shrink-0 text-sm" onClick={() => setPending({ data: s.data, label: `Otomatik kopya (${new Date(s.createdAt).toLocaleString('tr-TR')})` })}>
@@ -153,6 +154,39 @@ export function SettingsScreen({ data, onImport, offlineReady }: { data: AppData
               </li>
             ))}
           </ul>
+        </Card>
+      )}
+
+      {deleted && deleted.length > 0 && (
+        <Card icon={<Trash2 className="h-5 w-5" />} title={`Silinen katılımcılar (${deleted.length})`}>
+          <p className="text-sm text-slate-600">
+            Silinen kişiler listelerde görünmez ve yeni Excel yüklendiğinde geri eklenmez. Geri getirilen kişi katılımcı listesine döner; otobüse yeniden eklemeniz gerekir.
+          </p>
+          <details className="rounded-xl bg-surface">
+            <summary className="flex min-h-11 cursor-pointer items-center px-3 text-sm font-semibold">Listeyi göster</summary>
+            <ul className="space-y-2 px-2 pb-2">
+              {deleted.map((p) => (
+                <li key={p.id} className="flex items-center gap-2 rounded-xl bg-white p-2.5" data-testid="deleted-row">
+                  <div className="min-w-0 flex-1 text-sm">
+                    <p className="font-semibold break-words">{p.fullName}</p>
+                    <p className="break-words text-slate-600">
+                      {[p.company, new Date(p.deletedAt!).toLocaleString('tr-TR')].filter(Boolean).join(' · ')}
+                    </p>
+                  </div>
+                  <Button
+                    className="shrink-0 text-sm"
+                    onClick={() =>
+                      void restorePerson(p.id)
+                        .then(() => toast(`${p.fullName} katılımcı listesine geri getirildi`))
+                        .catch(() => undefined)
+                    }
+                  >
+                    <RotateCcw className="h-4 w-4" /> Geri getir
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </details>
         </Card>
       )}
 
@@ -204,7 +238,7 @@ export function SettingsScreen({ data, onImport, offlineReady }: { data: AppData
                 <b>{pending.label}</b>
               </p>
               <p className="mt-2">
-                Yedekte: {pending.data.persons.length} katılımcı, {pending.data.bus.length} otobüs yolcusu, {pending.data.sessions.length} yoklama oturumu,{' '}
+                Yedekte: {pending.data.persons.filter((p) => !p.deletedAt).length} katılımcı, {pending.data.bus.length} otobüs yolcusu, {pending.data.sessions.length} yoklama oturumu,{' '}
                 {pending.data.checks.length} yoklama işareti.
               </p>
               <p className="mt-2 text-slate-600">

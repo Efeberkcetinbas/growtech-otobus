@@ -8,6 +8,8 @@ export interface Toast {
   kind: ToastKind;
   message: string;
   action?: ToastAction;
+  /** Ekranda kalma süresi (ms). */
+  duration?: number;
 }
 
 type Listener = (t: Toast) => void;
@@ -21,8 +23,8 @@ export function onToast(fn: Listener) {
   };
 }
 
-export function toast(message: string, kind: ToastKind = 'success', action?: ToastAction) {
-  const t = { id: ++counter, kind, message, action };
+export function toast(message: string, kind: ToastKind = 'success', action?: ToastAction, duration?: number) {
+  const t = { id: ++counter, kind, message, action, duration };
   listeners.forEach((l) => l(t));
 }
 

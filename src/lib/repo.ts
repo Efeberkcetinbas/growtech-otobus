@@ -153,7 +153,7 @@ export async function findSimilar(fullName: string, phone: string, excludeId?: s
   const all = await db.persons.toArray();
   const out: SimilarMatch[] = [];
   for (const p of all) {
-    if (p.id === excludeId) continue;
+    if (p.id === excludeId || p.deletedAt) continue;
     const other = foldTr(p.fullName);
     const nameHit = name.length >= 3 && (other === name || (name.length >= 6 && levenshtein(other, name) <= 2));
     const phones = [p.phone, ...p.sharedPhones].map(digitsOnly).filter(Boolean);
@@ -164,13 +164,56 @@ export async function findSimilar(fullName: string, phone: string, excludeId?: s
   return out;
 }
 
+// ---------------------------------------------------------------- silme
+
+export interface DeleteResult {
+  /** Kişi otobüsteyse eklenme zamanı (geri alırken aynı sıraya döner), değilse null. */
+  busAddedAt: number | null;
+}
+
+/**
+ * Katılımcıyı siler: ana listeden ve otobüs listesinden kaldırır.
+ * Kayıt silinme işaretiyle saklanır; geçmiş yoklama kayıtları korunur,
+ * aynı firmadaki diğer kişiler etkilenmez, yeni Excel yüklemesinde geri eklenmez.
+ */
+export async function deletePerson(id: string): Promise<DeleteResult> {
+  return guarded('Silme', () =>
+    db.transaction('rw', db.persons, db.bus, async () => {
+      const person = await db.persons.get(id);
+      if (!person || person.deletedAt) throw new Error('Kişi bulunamadı.');
+      const bus = await db.bus.get(id);
+      await db.bus.delete(id);
+      await db.persons.update(id, { deletedAt: Date.now() });
+      return { busAddedAt: bus?.addedAt ?? null };
+    }),
+  );
+}
+
+/** Silinen kişiyi geri getirir; busAddedAt verilirse otobüsteki eski sırasına da döner. */
+export async function restorePerson(id: string, busAddedAt: number | null = null) {
+  return guarded('Geri alma', () =>
+    db.transaction('rw', db.persons, db.bus, async () => {
+      const n = await db.persons
+        .where(':id')
+        .equals(id)
+        .modify((p) => {
+          delete p.deletedAt;
+          p.updatedAt = Date.now();
+        });
+      if (!n) throw new Error('Kişi bulunamadı.');
+      if (busAddedAt !== null && !(await db.bus.get(id))) await db.bus.add({ personId: id, addedAt: busAddedAt });
+    }),
+  );
+}
+
 // ---------------------------------------------------------------- otobüs
 
 /** Kişiyi otobüse ekler. Zaten ekliyse false döner; aynı kişi iki kez eklenemez. */
 export async function addToBus(personId: string): Promise<boolean> {
   return guarded('Otobüse ekleme', () =>
     db.transaction('rw', db.bus, db.persons, async () => {
-      if (!(await db.persons.get(personId))) throw new Error('Kişi bulunamadı.');
+      const person = await db.persons.get(personId);
+      if (!person || person.deletedAt) throw new Error('Kişi bulunamadı.');
       if (await db.bus.get(personId)) return false;
       await db.bus.add({ personId, addedAt: Date.now() });
       return true;
