@@ -1,0 +1,36 @@
+# Bağımlılıklar ve derleme çıktıları
+node_modules/
+dist/
+dev-dist/
+*.tsbuildinfo
+coverage/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# KİŞİSEL VERİ – asla commit edilmez
+*.xlsx
+*.xls
+*.xlsm
+*.xlsb
+*.csv
+*.ods
+~$*
+growtech-yedek-*.json
+*-yedek*.json
+*.backup.json
+backups/
+local-data/
+real-data/
+tests/local/*.local.*
+
+# Ortam / editör
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
