@@ -14,7 +14,8 @@
     "test:e2e": "playwright test",
     "test:real": "vitest run tests/local --silent=false",
     "icons": "node scripts/generate-icons.mjs",
-    "leak-check": "node scripts/leak-check.mjs"
+    "leak-check": "node scripts/leak-check.mjs",
+    "check:lock": "node scripts/check-lock.mjs"
   },
   "dependencies": {
     "dexie": "^4.4.7",

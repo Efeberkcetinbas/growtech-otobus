@@ -42,6 +42,7 @@ describe('PDF verisi (oluşturma anındaki IndexedDB)', () => {
     const a = await person('AHMET YAPAY');
     const b = await person('MEHMET DENEMEOĞLU');
     await addToBus(a.id);
+    await new Promise((r) => setTimeout(r, 3)); // farklı eklenme zamanı (sıra belirli olsun)
     await addToBus(b.id);
     expect(await collectPassengers()).toHaveLength(2);
     await updatePerson(a.id, { fullName: 'AHMET YAPAY KAYA', phone: '05000009999', company: a.company, boardingPlace: 'BORSA', note: '' });
@@ -55,6 +56,7 @@ describe('PDF verisi (oluşturma anındaki IndexedDB)', () => {
     const a = await person('AHMET YAPAY');
     const b = await person('MEHMET DENEMEOĞLU');
     await addToBus(a.id);
+    await new Promise((r) => setTimeout(r, 3)); // farklı eklenme zamanı (sıra belirli olsun)
     await addToBus(b.id);
     const [gidis, donus] = await db.sessions.orderBy('order').toArray();
     await toggleCheck(gidis.id, a.id);

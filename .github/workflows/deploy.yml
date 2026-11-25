@@ -26,6 +26,9 @@ jobs:
           node-version: 24
           cache: npm
 
+      - name: Kilit dosyası tutarlılığı
+        run: node scripts/check-lock.mjs
+
       - name: Bağımlılıklar
         run: npm ci
 
