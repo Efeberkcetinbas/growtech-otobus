@@ -2,7 +2,7 @@ import type { AttendanceSession, BackupData, Flag, Person, Snapshot } from '../t
 import { VERIFY_FLAGS } from '../types';
 import { db } from './db';
 import { guarded } from './notify';
-import { normalizePhone } from './phone';
+import { normalizePhone, splitPhones } from './phone';
 import { cleanSpaces, digitsOnly, foldTr, levenshtein } from './text';
 
 export const SCHEMA_VERSION = 1;
@@ -47,6 +47,14 @@ export interface PersonInput {
   company: string;
   boardingPlace: string;
   note: string;
+  /** Ek numaralar (serbest metin; "/", virgül veya satır sonu ile ayrılabilir). */
+  extraPhones?: string;
+}
+
+/** Ek numara metnini string numaralara ayırır (ana numarayla aynı olanlar atılır). */
+export function parseExtraPhones(raw: string | undefined, main: string): { values: string[]; valid: boolean } {
+  const parts = splitPhones(raw ?? '').filter((p) => p.value !== main);
+  return { values: parts.map((p) => p.value), valid: parts.every((p) => p.valid) };
 }
 
 /** Telefonu string olarak normalleştirir; tanınmayan biçimi olduğu gibi saklar. */
@@ -55,12 +63,15 @@ export function cleanPhoneInput(raw: string): { value: string; valid: boolean } 
   return p ?? { value: '', valid: true };
 }
 
-function recomputeFlags(base: Flag[], p: Pick<Person, 'phone' | 'sharedPhones' | 'boardingPlace'>, phoneValid: boolean): Flag[] {
+function recomputeFlags(base: Flag[], p: Pick<Person, 'phone' | 'sharedPhones' | 'boardingPlace' | 'extraPhones'>, phoneValid: boolean): Flag[] {
   const set = new Set(base);
+  const extras = p.extraPhones ?? [];
   set.delete('missing-phone');
   set.delete('boarding-unknown');
   set.delete('invalid-phone');
-  if (!p.phone && p.sharedPhones.length === 0) set.add('missing-phone');
+  set.delete('extra-phone');
+  if (!p.phone && !extras.length && p.sharedPhones.length === 0) set.add('missing-phone');
+  if (extras.length) set.add('extra-phone');
   if (!p.boardingPlace) set.add('boarding-unknown');
   if (!phoneValid) set.add('invalid-phone');
   if (!p.sharedPhones.length) set.delete('shared-phone');
@@ -72,8 +83,10 @@ export async function createPerson(input: PersonInput, addToBus: boolean): Promi
   const phone = cleanPhoneInput(input.phone);
   const fullName = cleanSpaces(input.fullName).replace(/\n/g, ' ');
   if (!fullName) throw new Error('Ad soyad zorunludur.');
+  const extra = parseExtraPhones(input.extraPhones, phone.value);
   const base = {
     phone: phone.value,
+    extraPhones: extra.values,
     sharedPhones: [] as string[],
     boardingPlace: cleanSpaces(input.boardingPlace),
   };
@@ -88,7 +101,7 @@ export async function createPerson(input: PersonInput, addToBus: boolean): Promi
     note: cleanSpaces(input.note),
     source: 'manual',
     edited: false,
-    flags: recomputeFlags([], base, phone.valid),
+    flags: recomputeFlags([], base, phone.valid && extra.valid),
     createdAt: now,
     updatedAt: now,
   };
@@ -113,9 +126,12 @@ export async function updatePerson(id: string, input: PersonInput & { verified?:
       const phone = cleanPhoneInput(input.phone);
       const fullName = cleanSpaces(input.fullName).replace(/\n/g, ' ');
       if (!fullName) throw new Error('Ad soyad zorunludur.');
+      const extra =
+        input.extraPhones === undefined ? { values: cur.extraPhones ?? [], valid: true } : parseExtraPhones(input.extraPhones, phone.value);
       const next = {
         fullName,
         phone: phone.value,
+        extraPhones: extra.values,
         sharedPhones: input.keepSharedPhones === false ? [] : cur.sharedPhones,
         company: cleanSpaces(input.company),
         boardingPlace: cleanSpaces(input.boardingPlace),
@@ -130,10 +146,11 @@ export async function updatePerson(id: string, input: PersonInput & { verified?:
         next.company !== cur.company ||
         next.boardingPlace !== cur.boardingPlace ||
         next.note !== cur.note ||
+        next.extraPhones.join('|') !== (cur.extraPhones ?? []).join('|') ||
         next.sharedPhones.length !== cur.sharedPhones.length;
       await db.persons.update(id, {
         ...next,
-        flags: recomputeFlags(flags, next, phone.valid),
+        flags: recomputeFlags(flags, next, phone.valid && extra.valid),
         edited: cur.edited || (cur.source === 'excel' && changed),
         updatedAt: Date.now(),
       });
@@ -156,7 +173,7 @@ export async function findSimilar(fullName: string, phone: string, excludeId?: s
     if (p.id === excludeId || p.deletedAt) continue;
     const other = foldTr(p.fullName);
     const nameHit = name.length >= 3 && (other === name || (name.length >= 6 && levenshtein(other, name) <= 2));
-    const phones = [p.phone, ...p.sharedPhones].map(digitsOnly).filter(Boolean);
+    const phones = [p.phone, ...(p.extraPhones ?? []), ...p.sharedPhones].map(digitsOnly).filter(Boolean);
     const phoneHit = phoneDigits.length >= 10 && phones.includes(phoneDigits);
     if (nameHit) out.push({ person: p, reason: 'name' });
     else if (phoneHit) out.push({ person: p, reason: 'phone' });
@@ -183,7 +200,7 @@ export async function deletePerson(id: string): Promise<DeleteResult> {
       if (!person || person.deletedAt) throw new Error('Kişi bulunamadı.');
       const bus = await db.bus.get(id);
       await db.bus.delete(id);
-      await db.persons.update(id, { deletedAt: Date.now() });
+      await db.persons.update(id, { deletedAt: Date.now(), removedBy: 'user' });
       return { busAddedAt: bus?.addedAt ?? null };
     }),
   );
@@ -198,6 +215,8 @@ export async function restorePerson(id: string, busAddedAt: number | null = null
         .equals(id)
         .modify((p) => {
           delete p.deletedAt;
+          delete p.removedBy;
+          delete p.removedReason;
           p.updatedAt = Date.now();
         });
       if (!n) throw new Error('Kişi bulunamadı.');

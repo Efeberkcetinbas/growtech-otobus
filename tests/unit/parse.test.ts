@@ -138,21 +138,22 @@ describe('Excel ayrıştırma (yapay veri)', () => {
     expect(stats.excludedRows).toBe(SYNTHETIC_EXPECTED.totalRows - SYNTHETIC_EXPECTED.busRows);
     const cat = (sicil: string) => res.rows.find((r) => r.sicilNo === sicil)!.category;
     expect(cat('9007')).toBe('typo');
-    expect(cat('9008')).toBe('other-transport');
-    expect(cat('9012')).toBe('unknown-transport');
+    expect(cat('9008')).toBe('excluded'); // SPRİNTER kesinlikle alınmaz
+    expect(cat('9012')).toBe('excluded'); // ulaşım belirsiz
+    expect(res.rows.find((r) => r.sicilNo === '9008')!.excludeReason).toMatch(/SPRİNTER/);
     expect(cat('9009')).toBe('excluded');
     expect(cat('9013')).toBe('excluded'); // Katılmayacak ama OTOBÜS yazılmış
   });
 
-  it('SPRİNTER / OTOBÜD yalnızca kullanıcı seçerse dahil olur', () => {
+  it('OTOBÜD yalnızca kullanıcı onaylarsa, SPRİNTER hiçbir zaman dahil olmaz', () => {
     const res = parseRows(rows);
     const sel = defaultSelection(res);
     const typo = res.rows.find((r) => r.category === 'typo')!;
-    const other = res.rows.find((r) => r.category === 'other-transport')!;
+    const sprinter = res.rows.find((r) => r.sicilNo === '9008')!;
     expect(sel.has(typo.rowNumber)).toBe(false);
     sel.add(typo.rowNumber);
-    sel.add(other.rowNumber);
-    expect(computeStats(res, sel).parsedPeople).toBe(SYNTHETIC_EXPECTED.busPeople + 2);
+    sel.add(sprinter.rowNumber); // seçilmeye çalışılsa bile sayılmaz
+    expect(computeStats(res, sel).parsedPeople).toBe(SYNTHETIC_EXPECTED.busPeople + 1);
   });
 
   it('telefonları string saklar, firma telefonunu kişisel telefonla karıştırmaz', () => {

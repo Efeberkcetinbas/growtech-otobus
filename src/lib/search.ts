@@ -5,7 +5,7 @@ import { digitsOnly, foldTr } from './text';
 export function searchIndex(p: Person): { text: string; digits: string[] } {
   return {
     text: foldTr([p.fullName, p.company, p.boardingPlace].join(' ')),
-    digits: [p.phone, ...p.sharedPhones].map(digitsOnly).filter(Boolean),
+    digits: [p.phone, ...(p.extraPhones ?? []), ...p.sharedPhones].map(digitsOnly).filter(Boolean),
   };
 }
 

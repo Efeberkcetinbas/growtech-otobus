@@ -42,7 +42,8 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest}'],
+        // ttf: PDF için gömülü Türkçe yazı tipi (çevrimdışı PDF oluşturma)
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest,ttf}'],
         navigateFallback: 'index.html',
         cleanupOutdatedCaches: true,
       },

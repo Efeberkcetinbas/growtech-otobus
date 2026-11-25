@@ -23,21 +23,14 @@ export type Flag =
   /** Son Excel yüklemesinde bu kişi bulunamadı (silinmedi). */
   | 'missing-from-latest-import';
 
-export const VERIFY_FLAGS: Flag[] = [
-  'pairing-unverified',
-  'shared-phone',
-  'invalid-phone',
-  'extra-phone',
-  'ambiguous-separator',
-  'transport-typo',
-];
+export const VERIFY_FLAGS: Flag[] = ['pairing-unverified', 'shared-phone', 'invalid-phone', 'ambiguous-separator', 'transport-typo'];
 
 export const FLAG_LABELS: Record<Flag, string> = {
   'pairing-unverified': 'İsim–telefon eşleşmesi doğrulanmadı',
   'shared-phone': 'Ortak irtibat numarası',
   'missing-phone': 'Telefon yok',
   'invalid-phone': 'Telefon biçimi hatalı',
-  'extra-phone': 'Birden fazla numara',
+  'extra-phone': 'Birden fazla numarası var',
   'ambiguous-separator': 'İsim ayrımı doğrulanmalı',
   'boarding-unknown': 'Biniş yeri belirsiz',
   'transport-typo': 'Ulaşım yazımı onaylandı (ör. OTOBÜD)',
@@ -50,6 +43,7 @@ export const FLAG_LABELS: Record<Flag, string> = {
 export interface ImportSnapshot {
   fullName: string;
   phone: string;
+  extraPhones?: string[];
   sharedPhones: string[];
   company: string;
   boardingPlace: string;
@@ -60,6 +54,8 @@ export interface Person {
   fullName: string;
   /** Kişinin kendi telefonu (string). Bilinmiyorsa boş. */
   phone: string;
+  /** Kişinin kendi ek numaraları (eski kayıtlarda olmayabilir). */
+  extraPhones?: string[];
   /** Kime ait olduğu bilinmeyen ortak irtibat numaraları. */
   sharedPhones: string[];
   company: string;
@@ -85,6 +81,14 @@ export interface Person {
    * aynı kişi otomatik olarak geri eklenmez.
    */
   deletedAt?: number;
+  /**
+   * Kim kaldırdı? 'user': kullanıcı sildi (Excel'den asla otomatik geri gelmez).
+   * 'import': yeni Excel'de artık otobüs katılımcısı değildi ve kullanıcı onayıyla
+   * aktif listeden çıkarıldı (ileride Excel'de yine otobüsle gelirse geri alınabilir).
+   */
+  removedBy?: 'user' | 'import';
+  /** Excel'den çıkarılma nedeni (ör. "Sarı işaretli satır"). */
+  removedReason?: string;
   createdAt: number;
   updatedAt: number;
 }

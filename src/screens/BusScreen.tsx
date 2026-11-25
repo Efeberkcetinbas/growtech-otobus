@@ -1,6 +1,7 @@
-import { Bus, Copy, Download, Pencil, Share2, Trash2, UserMinus } from 'lucide-react';
+import { Bus, Copy, Download, FileText, Pencil, Share2, Trash2, UserMinus } from 'lucide-react';
 import { useDeferredValue, useMemo, useState } from 'react';
 import { DeleteButton, DeletePersonDialog } from '../components/DeletePerson';
+import { PdfSheet } from '../components/PdfSheet';
 import { CallButton, FlagBadges, MetaLines, PhoneLine } from '../components/PersonBits';
 import { Button, ConfirmDialog, EmptyState, SearchBox } from '../components/ui';
 import type { AppData, BusEntry } from '../hooks/useAppData';
@@ -27,6 +28,7 @@ export function BusScreen({ data, onEdit, goParticipants }: { data: AppData; onE
   const [sort, setSort] = useState<Sort>('added');
   const [confirmClear, setConfirmClear] = useState(false);
   const [toDelete, setToDelete] = useState<Person | null>(null);
+  const [pdfOpen, setPdfOpen] = useState(false);
   const deferred = useDeferredValue(query);
 
   const sorted = useMemo(() => sortEntries(data.busEntries, sort), [data.busEntries, sort]);
@@ -105,6 +107,10 @@ export function BusScreen({ data, onEdit, goParticipants }: { data: AppData; onE
         </label>
       </div>
 
+      <Button variant="primary" className="w-full" onClick={() => setPdfOpen(true)} data-testid="open-pdf">
+        <FileText className="h-5 w-5" /> PDF yolcu listesi (oluştur / indir / paylaş)
+      </Button>
+
       <div className="grid grid-cols-3 gap-2">
         <Button onClick={copy} className="flex-col !gap-0.5 py-1 text-xs">
           <Copy className="h-5 w-5" /> Kopyala
@@ -154,6 +160,7 @@ export function BusScreen({ data, onEdit, goParticipants }: { data: AppData; onE
         <Trash2 className="h-5 w-5" /> Tüm otobüs listesini temizle
       </Button>
 
+      {pdfOpen && <PdfSheet sessions={data.sessions} activeSessionId={data.activeSession?.id} onClose={() => setPdfOpen(false)} />}
       {toDelete && <DeletePersonDialog person={toDelete} onBus onClose={() => setToDelete(null)} />}
 
       {confirmClear && (

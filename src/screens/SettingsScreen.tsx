@@ -172,6 +172,9 @@ export function SettingsScreen({ data, onImport, offlineReady }: { data: AppData
                     <p className="break-words text-slate-600">
                       {[p.company, new Date(p.deletedAt!).toLocaleString('tr-TR')].filter(Boolean).join(' · ')}
                     </p>
+                    <p className="text-xs font-semibold text-slate-500">
+                      {p.removedBy === 'import' ? `Excel güncellemesiyle çıkarıldı: ${p.removedReason ?? ''}` : 'Sizin tarafınızdan silindi'}
+                    </p>
                   </div>
                   <Button
                     className="shrink-0 text-sm"

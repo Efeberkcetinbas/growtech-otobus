@@ -15,8 +15,8 @@ async function assertTouchTargets(page: Page) {
         const r = el.getBoundingClientRect();
         const style = getComputedStyle(el);
         if (r.width === 0 || r.height === 0 || style.visibility === 'hidden' || el.classList.contains('sr-only')) return false;
-        if (el.tagName === 'INPUT' && (el as HTMLInputElement).type === 'checkbox') {
-          // checkbox'lar 44px'lik etiket alanının içinde
+        if (el.tagName === 'INPUT' && ['checkbox', 'radio'].includes((el as HTMLInputElement).type)) {
+          // checkbox/radio'lar 44px'lik etiket alanının içinde
           const label = el.closest('label');
           return !label || label.getBoundingClientRect().height < 44;
         }
@@ -39,6 +39,13 @@ test('mobil yerleşim: yatay kaydırma yok, dokunma alanları ≥ 44px', async (
     await assertNoHorizontalScroll(page);
     await assertTouchTargets(page);
   }
+  // PDF ekranı
+  await nav(page, 'Otobüsüm');
+  await page.getByTestId('open-pdf').click();
+  await assertNoHorizontalScroll(page);
+  await assertTouchTargets(page);
+  await page.getByRole('button', { name: 'Kapat' }).click();
+
   // Form ve içe aktarma ekranları
   await nav(page, 'Katılımcılar');
   await page.getByRole('button', { name: 'Yeni Katılımcı' }).click();

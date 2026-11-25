@@ -32,6 +32,8 @@ const REQUIRED: ColumnKey[] = ['attendance', 'name', 'transport'];
 /** Başlık metnini (sadeleştirilmiş) bir sütun anahtarıyla eşleştirir. Sıra önemlidir. */
 function matchHeader(folded: string): ColumnKey | null {
   const f = ` ${folded} `;
+  // TC kimlik numarası sütunu hiçbir alana eşlenmez; değerleri okunmaz.
+  if (/ tc( |$)/.test(f) || f.includes('kimlik')) return null;
   if (f.includes(' sicil')) return 'sicil';
   if (f.includes('binecegi') || f.includes('binis')) return 'boarding';
   if (f.includes('irtibat') || (f.includes('katilimci') && (f.includes(' tel') || f.includes('numara')))) return 'phone';
@@ -128,7 +130,7 @@ export interface NamePart {
 export function splitNames(cell: string): { parts: NamePart[]; ambiguous: boolean } {
   const text = cleanSpaces(cell);
   if (!text) return { parts: [], ambiguous: false };
-  const ambiguous = /\s-\s/.test(text);
+  let ambiguous = /\s-\s/.test(text);
   const parts: NamePart[] = [];
   for (const seg of text.split(NAME_SPLIT)) {
     const roles: string[] = [];
@@ -144,6 +146,8 @@ export function splitNames(cell: string): { parts: NamePart[]; ambiguous: boolea
     if (!name || !/[A-Za-zÇĞİÖŞÜçğıöşü]/.test(name)) continue;
     parts.push({ fullName: name, role: roles.join(', ') });
   }
+  // "AHMET / YILMAZ" gibi tek kelimelik parça: ad ve soyad yanlışlıkla bölünmüş olabilir.
+  if (parts.length > 1 && parts.some((p) => !p.fullName.includes(' '))) ambiguous = true;
   return { parts, ambiguous: ambiguous && parts.length > 1 };
 }
 
@@ -152,13 +156,20 @@ export interface ParsedPerson {
   fullName: string;
   role: string;
   phone: string;
+  /** Tek kişiye yazılmış ek numaralar (kişinin kendi numaraları). */
+  extraPhones: string[];
   sharedPhones: string[];
   flags: Flag[];
   /** Kullanıcının önizlemede seçebileceği, satırdaki tüm numaralar. */
   phoneOptions: string[];
 }
 
-export type RowCategory = 'included' | 'typo' | 'other-transport' | 'unknown-transport' | 'excluded';
+/**
+ * included: Katılacak + OTOBÜS + sarı değil (varsayılan olarak alınır)
+ * typo: OTOBÜD gibi yazım hatası (yalnızca kullanıcı onaylarsa alınır)
+ * excluded: diğer her şey (sarı, KENDİ, SPRİNTER, ŞOFÖR, belirsiz, katılmayacak…)
+ */
+export type RowCategory = 'included' | 'typo' | 'excluded';
 
 export interface ParsedRow {
   rowNumber: number;
@@ -172,6 +183,8 @@ export interface ParsedRow {
   extraNote: string;
   attendance: Attendance;
   transport: Transport;
+  /** Satırdaki herhangi bir veri hücresi sarı (#FFFF00) dolgulu mu? */
+  yellow: boolean;
   category: RowCategory;
   excludeReason: string;
   people: ParsedPerson[];
@@ -184,12 +197,36 @@ export interface ParseResult {
   header: HeaderInfo;
   totalRows: number;
   rows: ParsedRow[];
+  /** Hücre dolgu renkleri okundu mu? Okunamadıysa içe aktarma yapılmaz. */
+  stylesRead: boolean;
+}
+
+export interface ParseOptions {
+  /** Sarı dolgulu satırların `rows` dizisindeki indeksleri. */
+  yellowRows?: Set<number>;
+  stylesRead?: boolean;
+  /** `rows[0]` sayfanın kaçıncı satırı (0 tabanlı). */
+  rowOffset?: number;
 }
 
 export class ExcelFormatError extends Error {}
 
+export const REASONS = {
+  yellow: 'Sarı işaretli satır',
+  notAttending: 'Katılmayacak',
+  unreachable: 'Ulaşılamadı',
+  attendanceUnknown: 'Katılım durumu belirtilmemiş',
+  ownCar: 'Kendi aracıyla gelecek (KENDİ / KENDİ ARACI)',
+  otherTransport: 'Otobüs dışı ulaşım (SPRİNTER, ŞOFÖR vb.)',
+  unknownTransport: 'Ulaşım türü belirsiz',
+  noName: 'Katılımcı adı yazılmamış',
+  duplicate: 'Mükerrer satır (aynı firma ve isim daha önce var)',
+} as const;
+
 /** Excel satırlarını katılımcı kayıtlarına ayrıştırır. Veri uydurmaz. */
-export function parseRows(rows: Cell[][], sheetName = 'Sayfa'): ParseResult {
+export function parseRows(rows: Cell[][], sheetName = 'Sayfa', opts: ParseOptions = {}): ParseResult {
+  const yellowRows = opts.yellowRows ?? new Set<number>();
+  const rowOffset = opts.rowOffset ?? 0;
   const header = detectHeader(rows);
   if (!header) throw new ExcelFormatError('Başlık satırı bulunamadı. Katılımcı Ad/Soyad, Katılacak ve Otobüs sütunları gerekli.');
   if (header.missingRequired.length) {
@@ -216,23 +253,26 @@ export function parseRows(rows: Cell[][], sheetName = 'Sayfa'): ParseResult {
     const transport = classifyTransport(transportRaw);
     const boardingInfo = cleanBoarding(get(row, 'boarding'));
     const extraNote = get(row, 'extra');
+    const yellow = yellowRows.has(i);
 
+    // Sıra önemli: sarı işaret her şeyden önce gelir (OTOBÜS olsa bile alınmaz).
     let category: RowCategory = 'excluded';
-    let excludeReason = '';
-    if (attendance === 'not-attending') excludeReason = 'Katılmayacak';
-    else if (attendance === 'unreachable') excludeReason = 'Ulaşılamadı';
-    else if (attendance === 'unknown') excludeReason = 'Katılım durumu belirtilmemiş';
-    else if (transport === 'own-car') excludeReason = 'Kendi aracıyla gelecek';
+    let excludeReason: string = '';
+    if (yellow) excludeReason = REASONS.yellow;
+    else if (attendance === 'not-attending') excludeReason = REASONS.notAttending;
+    else if (attendance === 'unreachable') excludeReason = REASONS.unreachable;
+    else if (attendance === 'unknown') excludeReason = REASONS.attendanceUnknown;
+    else if (transport === 'own-car') excludeReason = REASONS.ownCar;
+    else if (transport === 'other') excludeReason = REASONS.otherTransport;
+    else if (transport === 'unknown') excludeReason = REASONS.unknownTransport;
     else if (transport === 'bus') category = 'included';
-    else if (transport === 'bus-typo') category = 'typo';
-    else if (transport === 'other') category = 'other-transport';
-    else category = 'unknown-transport';
+    else category = 'typo';
 
     const { parts, ambiguous } = splitNames(get(row, 'name'));
     const phones = splitPhones(get(row, 'phone'));
     if (category !== 'excluded' && parts.length === 0) {
       category = 'excluded';
-      excludeReason = 'Katılımcı adı yazılmamış';
+      excludeReason = REASONS.noName;
     }
 
     const people = pairPeople(parts, phones, ambiguous);
@@ -240,8 +280,6 @@ export function parseRows(rows: Cell[][], sheetName = 'Sayfa'): ParseResult {
     for (const p of people) {
       if (boardingInfo.unknown) p.flags.push('boarding-unknown');
       if (category === 'typo') p.flags.push('transport-typo');
-      if (category === 'other-transport') p.flags.push('transport-other');
-      if (category === 'unknown-transport') p.flags.push('transport-unknown');
       p.sourceKey = `${companyKey}|${foldTr(p.fullName)}`;
       if (category !== 'excluded') {
         // Aynı firma + aynı isim tekrar yazılmışsa mükerrer kişi oluşturma.
@@ -252,11 +290,11 @@ export function parseRows(rows: Cell[][], sheetName = 'Sayfa'): ParseResult {
     }
     if (category !== 'excluded' && uniquePeople.length === 0) {
       category = 'excluded';
-      excludeReason = 'Mükerrer satır (aynı firma ve isim daha önce var)';
+      excludeReason = REASONS.duplicate;
     }
 
     parsed.push({
-      rowNumber: i + 1,
+      rowNumber: rowOffset + i + 1,
       sicilNo,
       company,
       companyKey,
@@ -267,15 +305,16 @@ export function parseRows(rows: Cell[][], sheetName = 'Sayfa'): ParseResult {
       extraNote,
       attendance,
       transport,
+      yellow,
       category,
       excludeReason,
       people: category === 'excluded' ? people : uniquePeople,
       needsVerification: (category === 'excluded' ? people : uniquePeople).some((p) =>
-        p.flags.some((f) => f === 'pairing-unverified' || f === 'shared-phone' || f === 'ambiguous-separator' || f === 'extra-phone' || f === 'invalid-phone'),
+        p.flags.some((f) => f === 'pairing-unverified' || f === 'shared-phone' || f === 'ambiguous-separator' || f === 'invalid-phone'),
       ),
     });
   }
-  return { sheetName, header, totalRows, rows: parsed };
+  return { sheetName, header, totalRows, rows: parsed, stylesRead: opts.stylesRead ?? false };
 }
 
 function cellToText(c: Cell): string {
@@ -288,6 +327,7 @@ function cellToText(c: Cell): string {
 /**
  * İsimlerle numaraları eşleştirir.
  * - 1 isim / 1 numara: doğrudan atanır.
+ * - 1 isim / birden fazla numara: hepsi o kişinindir (ilk numara + ek numaralar).
  * - N isim / N numara (N>1): sıralı eşleştirme ÖNERİLİR, doğrulanmamış işaretlenir.
  * - N isim / 1 numara: numara kimseye atanmaz, ortak irtibat olarak gösterilir.
  * - Sayılar farklıysa: hiçbir numara tahminle atanmaz, hepsi ortak irtibat olur.
@@ -303,12 +343,13 @@ export function pairPeople(
   return parts.map((part, idx) => {
     const flags: Flag[] = [];
     let phone = '';
+    let extraPhones: string[] = [];
     let sharedPhones: string[] = [];
     if (parts.length === 1) {
       phone = values[0] ?? '';
       if (values.length > 1) {
         flags.push('extra-phone');
-        sharedPhones = values.slice(1);
+        extraPhones = values.slice(1);
       }
     } else if (values.length === parts.length) {
       phone = values[idx];
@@ -318,16 +359,23 @@ export function pairPeople(
       flags.push('shared-phone');
     }
     if (!phone && sharedPhones.length === 0) flags.push('missing-phone');
-    if ((phone && invalid.has(phone)) || sharedPhones.some((s) => invalid.has(s))) flags.push('invalid-phone');
+    if ([phone, ...extraPhones, ...sharedPhones].some((s) => s && invalid.has(s))) flags.push('invalid-phone');
     if (ambiguousSeparator) flags.push('ambiguous-separator');
-    return { sourceKey: '', fullName: part.fullName, role: part.role, phone, sharedPhones, flags, phoneOptions: values };
+    return { sourceKey: '', fullName: part.fullName, role: part.role, phone, extraPhones, sharedPhones, flags, phoneOptions: values };
   });
 }
 
 /** Kullanıcının dahil etme seçimine göre özet istatistik. */
 export interface ImportStats {
   totalRows: number;
+  /** Sarı dolgulu satır sayısı. */
+  yellowRows: number;
   attendingRows: number;
+  /** Ulaşımı OTOBÜS olan tüm satırlar (sarılar dahil). */
+  busRowsAll: number;
+  /** Sarı olduğu için dışarıda kalan OTOBÜS satırları. */
+  busRowsYellow: number;
+  /** Katılacak + OTOBÜS + sarı değil (ayrıştırma öncesi satır sayısı). */
   busRows: number;
   selectedRows: number;
   parsedPeople: number;
@@ -343,10 +391,17 @@ export function isSelectable(row: ParsedRow) {
   return row.category !== 'excluded';
 }
 
-export function computeStats(result: ParseResult, selected: Set<number>): ImportStats {
+/**
+ * @param peopleOf Önizlemedeki doğrulama kararları (ör. "tek kişi olarak birleştir")
+ *   uygulanmış kişi listesi; verilmezse ayrıştırılmış kişiler kullanılır.
+ */
+export function computeStats(result: ParseResult, selected: Set<number>, peopleOf: (row: ParsedRow) => ParsedPerson[] = (r) => r.people): ImportStats {
   const stats: ImportStats = {
     totalRows: result.totalRows,
+    yellowRows: 0,
     attendingRows: 0,
+    busRowsAll: 0,
+    busRowsYellow: 0,
     busRows: 0,
     selectedRows: 0,
     parsedPeople: 0,
@@ -358,15 +413,19 @@ export function computeStats(result: ParseResult, selected: Set<number>): Import
     excludedByReason: {},
   };
   for (const row of result.rows) {
+    if (row.yellow) stats.yellowRows++;
     if (row.attendance === 'attending') stats.attendingRows++;
+    if (row.transport === 'bus') stats.busRowsAll++;
+    if (row.transport === 'bus' && row.yellow) stats.busRowsYellow++;
     if (row.category === 'included') stats.busRows++;
     if (selected.has(row.rowNumber) && isSelectable(row)) {
+      const people = peopleOf(row);
       stats.selectedRows++;
-      stats.parsedPeople += row.people.length;
-      if (row.people.length > 1) stats.multiPersonRows++;
+      stats.parsedPeople += people.length;
+      if (people.length > 1) stats.multiPersonRows++;
       if (row.needsVerification) stats.verificationRows++;
-      for (const p of row.people) {
-        if (!p.phone && p.sharedPhones.length === 0) stats.missingPhone++;
+      for (const p of people) {
+        if (!p.phone && !p.extraPhones.length && p.sharedPhones.length === 0) stats.missingPhone++;
         if (!p.phone && p.sharedPhones.length > 0) stats.sharedPhonePeople++;
       }
     } else {
@@ -381,8 +440,6 @@ export function computeStats(result: ParseResult, selected: Set<number>): Import
 export const CATEGORY_REASON: Record<Exclude<RowCategory, 'excluded'>, string> = {
   included: 'Kullanıcı tarafından çıkarıldı',
   typo: 'Ulaşım yazım hatası şüphesi (onay bekliyor)',
-  'other-transport': 'Farklı ulaşım türü (ör. SPRİNTER)',
-  'unknown-transport': 'Ulaşım türü belirtilmemiş / belirsiz',
 };
 
 /** Varsayılan seçim: yalnızca "Katılacak + Otobüs" satırları. */

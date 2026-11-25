@@ -220,7 +220,7 @@ describe('Excel içe aktarma', () => {
     const res = parseRows(syntheticRows());
     const sel = defaultSelection(res);
     const before = computeStats(res, sel).parsedPeople;
-    sel.add(res.rows.find((r) => r.category === 'other-transport')!.rowNumber);
+    sel.add(res.rows.find((r) => r.category === 'typo')!.rowNumber);
     expect(computeStats(res, sel).parsedPeople).toBe(before + 1);
   });
 });

@@ -19,6 +19,7 @@ export function PersonForm({ person, boardingOptions, onClose }: Props) {
   const editing = !!person;
   const [fullName, setFullName] = useState(person?.fullName ?? '');
   const [phone, setPhone] = useState(person?.phone ? formatPhone(person.phone) : '');
+  const [extraPhones, setExtraPhones] = useState((person?.extraPhones ?? []).map(formatPhone).join(' / '));
   const [company, setCompany] = useState(person?.company ?? '');
   const [boardingPlace, setBoardingPlace] = useState(person?.boardingPlace ?? '');
   const [note, setNote] = useState(person?.note ?? '');
@@ -47,7 +48,7 @@ export function PersonForm({ person, boardingOptions, onClose }: Props) {
     }
     setSaving(true);
     try {
-      const input = { fullName, phone, company, boardingPlace, note };
+      const input = { fullName, phone, extraPhones, company, boardingPlace, note };
       if (person) {
         await updatePerson(person.id, { ...input, verified, keepSharedPhones: keepShared });
         toast('Bilgiler güncellendi');
@@ -118,6 +119,17 @@ export function PersonForm({ person, boardingOptions, onClose }: Props) {
           <label className="block">
             <span className="mb-1 block text-sm font-semibold">Telefon numarası</span>
             <input className={`${field} tabular-nums`} value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" type="tel" autoComplete="off" placeholder="05xx xxx xx xx" />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-semibold">Ek numaralar (isteğe bağlı)</span>
+            <input
+              className={`${field} tabular-nums`}
+              value={extraPhones}
+              onChange={(e) => setExtraPhones(e.target.value)}
+              inputMode="tel"
+              autoComplete="off"
+              placeholder="Birden fazlaysa / ile ayırın"
+            />
           </label>
           {person && person.sharedPhones.length > 0 && (
             <div className="rounded-xl bg-warn-50 p-3 text-sm">

@@ -27,16 +27,18 @@ Ana ekrandan açılan uygulama tam ekran çalışır ve tarayıcının kayıtlar
 1. **Katılımcılar** ekranındaki **Excel yükle** düğmesine (veya **Ayarlar → Excel yükle**) dokunun ve `.xlsx` dosyasını seçin.
 2. Uygulama başlık satırını **otomatik bulur**; sütunların sırası önemli değildir. Kullanılan sütunlar: *Üye Sicil No, Unvan, Katılacak/Katılmayacak, Katılımcı Ad/Soyad, Katılımcı İrtibat Numarası, Otobüs/Kendi Aracı, Bineceği Yer*.
 3. Önizleme ekranında şunlar gösterilir: toplam satır, katılacak üye, otobüs kullanacak üye, ayrıştırılmış kişi, eksik telefon, doğrulama gereken kayıtlar, birden fazla katılımcılı kayıtlar ve dışarıda bırakılanlar.
-4. Yalnızca **“Katılacak” + “Otobüs”** kayıtları varsayılan olarak alınır. Katılmayacak, ulaşılamayan ve kendi aracıyla gelecek kişiler alınmaz.
-5. **OTOBÜD** gibi yazım hataları ve **SPRİNTER** gibi farklı ulaşım türleri otomatik alınmaz; ayrı listelenir, isterseniz işaretleyerek dahil edersiniz.
+4. Uygulama hücre değerleriyle birlikte **hücre renklerini** de okur. **Sarı (#FFFF00) işaretli satırlar hiçbir koşulda alınmaz**; ulaşım türü OTOBÜS olsa bile. Satırdaki tek bir hücre sarıysa bütün satır dışarıda kalır. Başlık satırının rengi dikkate alınmaz. Renkler okunamazsa içe aktarma yapılmaz.
+5. Yalnızca şu üç koşulu sağlayan satırlar alınır: **Katılacak** + ulaşım **OTOBÜS** + **sarı değil**. KENDİ / KENDİ ARACI, SPRİNTER, ŞOFÖR, ulaşımı belirsiz olanlar ve katılmayacaklar alınmaz. **OTOBÜD** gibi yazım hataları yalnızca siz onaylarsanız alınır. **TC NO** sütunu hiçbir şekilde okunmaz ve saklanmaz.
 6. **Aynı hücrede birden fazla kişi** varsa (ör. `AHMET YILMAZ / MEHMET DEMİR`) her biri ayrı kişi olur.
    - İki isim + iki numara: sıralı eşleştirme **önerilir** ama “doğrulanmadı” olarak işaretlenir. Her kişinin numarasını seçip **Eşleştirme doğru** kutusunu işaretleyin.
    - İki isim + tek numara: numara kimseye atanmaz, **ortak irtibat** olarak gösterilir.
+   - Tek kişiye birden fazla numara yazılmışsa hepsi o kişinin numarası olarak saklanır (ana numara + ek numaralar).
+   - “AHMET / YILMAZ” gibi tek kelimelik parçalar ad-soyad bölünmesi olabilir; önizlemede “Bu bir kişinin adı soyadı” ile birleştirebilirsiniz.
    - Eksik isim veya telefon için **hiçbir zaman sahte veri üretilmez**.
    - Firmanın üye kaydındaki telefon, katılımcının kişisel telefonu yerine kullanılmaz.
 7. **Devam** → karşılaştırma ekranı → **İçe aktar**.
 
-**Yeni Excel yüklemek** otobüs listenizi, yoklamalarınızı ve elle yaptığınız düzeltmeleri silmez. Aynı kişi tekrar oluşturulmaz. Hem sizin düzelttiğiniz hem de Excel’de değişen bilgiler için **“Benimki kalsın / Excel’i kullan”** seçimi sorulur. Yeni dosyada olmayan kişiler silinmez, “Son Excel’de yok” etiketi alır. Her yüklemeden önce mevcut verilerin otomatik kopyası alınır.
+**Yeni Excel yüklemek** otobüs listenizi, yoklamalarınızı ve elle yaptığınız düzeltmeleri silmez. Aynı kişi tekrar oluşturulmaz. Hem sizin düzelttiğiniz hem de Excel’de değişen bilgiler için **“Benimki kalsın / Excel’i kullan”** seçimi sorulur. Yeni dosyada artık otobüsle gelmeyen (sarı işaretlenmiş, KENDİ/SPRİNTER olmuş veya listeden çıkmış) kişiler nedeniyle birlikte listelenir ve onayınızla aktif listeden çıkarılır; **otobüsünüzdeki** kişiler ayrıca işaretlemeden çıkarılmaz. Çıkarılan kayıtlar silinmez, geçmiş yoklamaları korunur ve Ayarlar’dan geri getirilebilir. Sizin sildiğiniz kişiler yeni Excel’le geri gelmez. Her yüklemeden önce mevcut verilerin otomatik kopyası alınır.
 
 ## Katılımcı arama
 
@@ -63,6 +65,18 @@ Ana ekrandan açılan uygulama tam ekran çalışır ve tarayıcının kayıtlar
 - Arama ve sıralama (eklenme sırası, isim, biniş yeri).
 - **Kopyala**, **Paylaş** (WhatsApp vb.), **Excel indir** (her yoklama oturumunun durumu dahil).
 - **Tüm otobüs listesini temizle** onay ister; kişiler havuzdan ve yoklama geçmişi silinmez.
+
+## PDF yolcu listesi
+
+**Otobüsüm → PDF yolcu listesi** ekranında:
+
+- İsteğe bağlı **otobüs numarası, plaka ve sorumlu** bilgisi girilir (cihazda saklanır).
+- **Standart Yolcu Listesi** veya **Yoklama Durumlu Yolcu Listesi** (Gidiş, Dönüş veya başka bir oturum seçilerek: Bindi / Bekleniyor, binen ve beklenen sayıları) seçilir.
+- **PDF Oluştur** (önizleme), **PDF İndir** ve **PDF Paylaş** düğmeleri vardır. Her seferinde liste, o anki güncel kayıtlardan yeniden hazırlanır; yalnızca otobüsünüzdeki kişiler yer alır.
+- Aynı firmadan gelen her kişi ayrı satırdır; toplam yolcu sayısı satır sayısına eşittir. Doğrulanmamış veya ortak numaralar “(doğrulanmadı)” notuyla, eksik numaralar “Belirtilmemiş” olarak yazılır.
+- A4 yatay, Türkçe karakterli gömülü yazı tipi (Noto Sans, SIL OFL), seçilebilir metin, her sayfada tablo başlığı ve sayfa numarası. Dosya adı örneği: `GROWTECH_2026_Otobus_1_Yolcu_Listesi_26-11-2026.pdf`.
+- **PDF Paylaş**, telefonun paylaşım ekranını açar ve gerçek PDF dosyasını WhatsApp, e-posta vb. uygulamalara gönderir. Paylaşmadan önce dosyanın kişisel veri içerdiği hatırlatılır. Tarayıcı dosya paylaşımını desteklemiyorsa PDF’i indirip uygulamadan ek olarak gönderebilirsiniz.
+- PDF oluşturma internet olmadan da çalışır.
 
 ## Yoklama alma
 

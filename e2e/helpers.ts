@@ -51,3 +51,25 @@ export async function importSynthetic(page: Page, opts: { includeTypo?: boolean 
 export function card(page: Page, name: string) {
   return page.getByTestId('participant-card').filter({ hasText: name });
 }
+
+/** Güncel biçimde (sarı satırlı) yapay Excel — ExcelJS ile hücre dolgularıyla üretilir. */
+export async function finalXlsx() {
+  const { buildFinalXlsx } = await import('../tests/fixtures/final');
+  return {
+    name: 'yapay-guncel-liste.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    buffer: await buildFinalXlsx(),
+  };
+}
+
+/** PDF metnini (Node tarafında) pdf.js ile çıkarır. */
+export async function pdfText(bytes: Buffer) {
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), disableFontFace: true }).promise;
+  const pages: string[] = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const tc = await (await doc.getPage(i)).getTextContent();
+    pages.push(tc.items.map((it) => ('str' in it ? it.str : '')).join(' '));
+  }
+  return pages;
+}

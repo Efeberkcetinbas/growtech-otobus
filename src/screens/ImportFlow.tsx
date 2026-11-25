@@ -2,12 +2,13 @@ import { AlertTriangle, CheckCircle2, ChevronDown, FileSpreadsheet, Loader2 } fr
 import { useMemo, useState, type ReactNode } from 'react';
 import { Button, Sheet } from '../components/ui';
 import { db } from '../lib/db';
-import { CATEGORY_REASON, computeStats, defaultSelection, type ParsedRow, type ParseResult } from '../lib/excel/parse';
+import { CATEGORY_REASON, COLUMN_LABELS, computeStats, defaultSelection, type ParsedRow, type ParseResult } from '../lib/excel/parse';
 import { readExcel } from '../lib/excel/read';
 import {
   applyImport,
   applyVerification,
   defaultAssignments,
+  defaultRemovals,
   FIELD_LABELS,
   NONE,
   planImport,
@@ -32,6 +33,7 @@ export function ImportFlow({ onClose, onDone }: { onClose: () => void; onDone: (
   const [verifications, setVerifications] = useState<Map<number, RowVerification>>(new Map());
   const [plan, setPlan] = useState<ImportPlan | null>(null);
   const [decisions, setDecisions] = useState<Decisions>(new Map());
+  const [removals, setRemovals] = useState<Set<string>>(new Set());
 
   async function onFile(file: File | undefined) {
     if (!file) return;
@@ -53,10 +55,15 @@ export function ImportFlow({ onClose, onDone }: { onClose: () => void; onDone: (
   async function buildPlan() {
     if (!result) return;
     try {
-      const existing = await db.persons.toArray();
-      const p = planImport(toIncoming(result, selected, verifications), existing);
+      const [existing, bus] = await Promise.all([db.persons.toArray(), db.bus.toArray()]);
+      const p = planImport(toIncoming(result, selected, verifications), existing, {
+        result,
+        selected,
+        busIds: new Set(bus.map((b) => b.personId)),
+      });
       setPlan(p);
       setDecisions(new Map());
+      setRemovals(defaultRemovals(p));
       setStage('plan');
     } catch (e) {
       toast(`Karşılaştırma yapılamadı: ${(e as Error).message}`, 'error');
@@ -67,9 +74,10 @@ export function ImportFlow({ onClose, onDone }: { onClose: () => void; onDone: (
     if (!plan) return;
     setStage('applying');
     try {
-      const r = await applyImport(plan, decisions, fileName);
+      const r = await applyImport(plan, decisions, fileName, removals);
       toast(
-        `İçe aktarıldı: ${r.created} yeni, ${r.updated + r.conflictsReplaced} güncellendi, ${r.unchanged + r.conflictsKept} korundu` +
+        `İçe aktarıldı: ${r.created + r.reactivated} yeni, ${r.updated + r.conflictsReplaced} güncellendi, ${r.unchanged + r.conflictsKept} korundu` +
+          (r.removed ? `, ${r.removed} kişi aktif listeden çıkarıldı` : '') +
           (r.skippedDeleted ? `, ${r.skippedDeleted} silinmiş kişi eklenmedi` : ''),
       );
       onDone();
@@ -149,7 +157,7 @@ export function ImportFlow({ onClose, onDone }: { onClose: () => void; onDone: (
         />
       )}
 
-      {(stage === 'plan' || stage === 'applying') && plan && <PlanView plan={plan} decisions={decisions} setDecisions={setDecisions} />}
+      {(stage === 'plan' || stage === 'applying') && plan && <PlanView plan={plan} decisions={decisions} setDecisions={setDecisions} removals={removals} setRemovals={setRemovals} />}
     </Sheet>
   );
 }
@@ -204,26 +212,22 @@ function Review({
   verifications: Map<number, RowVerification>;
   setVerifications: (m: Map<number, RowVerification>) => void;
 }) {
-  const stats = useMemo(() => computeStats(result, selected), [result, selected]);
+  const stats = useMemo(
+    () => computeStats(result, selected, (r) => applyVerification(r, verifications.get(r.rowNumber))),
+    [result, selected, verifications],
+  );
   const toggle = (n: number, on: boolean) => {
     const next = new Set(selected);
     if (on) next.add(n);
     else next.delete(n);
     setSelected(next);
   };
-  const setMany = (rows: ParsedRow[], on: boolean) => {
-    const next = new Set(selected);
-    rows.forEach((r) => (on ? next.add(r.rowNumber) : next.delete(r.rowNumber)));
-    setSelected(next);
-  };
   const byCat = (c: ParsedRow['category']) => result.rows.filter((r) => r.category === c);
   const typo = byCat('typo');
-  const other = byCat('other-transport');
-  const unknown = byCat('unknown-transport');
   const verifyRows = result.rows.filter((r) => r.category !== 'excluded' && selected.has(r.rowNumber) && r.needsVerification);
   const missingPhone = result.rows
     .filter((r) => r.category !== 'excluded' && selected.has(r.rowNumber))
-    .flatMap((r) => applyVerification(r, verifications.get(r.rowNumber)).filter((p) => !p.phone && !p.sharedPhones.length).map((p) => ({ r, p })));
+    .flatMap((r) => applyVerification(r, verifications.get(r.rowNumber)).filter((p) => !p.phone && !p.extraPhones.length && !p.sharedPhones.length).map((p) => ({ r, p })));
   const excluded = result.rows.filter((r) => r.category === 'excluded');
   const reasons = [...new Set(excluded.map((r) => r.excludeReason))];
 
@@ -233,13 +237,20 @@ function Review({
         <b>{fileName}</b> · Sayfa: {result.sheetName} · Başlık satırı: {result.header.headerIndex + 1}
       </p>
       {result.header.missingOptional.length > 0 && (
-        <p className="rounded-xl bg-warn-50 p-2.5 text-sm text-[#6b4510]">Bulunamayan isteğe bağlı sütunlar: {result.header.missingOptional.join(', ')}</p>
+        <p className="rounded-xl bg-warn-50 p-2.5 text-sm text-[#6b4510]">Bu dosyada olmayan isteğe bağlı sütunlar (sorun değil): {result.header.missingOptional.map((k) => COLUMN_LABELS[k]).join(', ')}</p>
       )}
+      <p className="flex items-start gap-2 rounded-xl bg-brand-50 p-2.5 text-sm text-brand-900" data-testid="styles-status">
+        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+        Hücre renkleri okundu. Sarı işaretli satırlar ulaşım türü ne olursa olsun alınmaz. Yalnızca “Katılacak” + “OTOBÜS” + sarı olmayan satırlar alınır.
+      </p>
       <div className="grid grid-cols-2 gap-2" data-testid="import-stats">
         <Stat label="Toplam satır" value={stats.totalRows} testId="stat-total" />
-        <Stat label="Katılacak üye" value={stats.attendingRows} testId="stat-attending" />
-        <Stat label="Otobüs kullanacak üye" value={stats.busRows} testId="stat-bus" />
-        <Stat label="Ayrıştırılmış kişi (seçili)" value={stats.parsedPeople} testId="stat-people" />
+        <Stat label="Sarı işaretli (alınmaz)" value={stats.yellowRows} tone="warn" testId="stat-yellow" />
+        <Stat label="Katılacak satır" value={stats.attendingRows} testId="stat-attending" />
+        <Stat label="OTOBÜS yazan satır (sarılar dahil)" value={stats.busRowsAll} testId="stat-bus-all" />
+        <Stat label="Sarı işaretli OTOBÜS (alınmaz)" value={stats.busRowsYellow} tone="warn" testId="stat-bus-yellow" />
+        <Stat label="Uygun otobüs satırı" value={stats.busRows} testId="stat-bus" />
+        <Stat label="Ayrıştırılmış gerçek kişi" value={stats.parsedPeople} testId="stat-people" />
         <Stat label="Telefonu eksik kişi" value={stats.missingPhone} tone="warn" />
         <Stat label="Doğrulama gereken kayıt" value={stats.verificationRows} tone="warn" testId="stat-verify" />
         <Stat label="Birden fazla katılımcılı kayıt" value={stats.multiPersonRows} />
@@ -266,26 +277,6 @@ function Review({
           <p className="text-sm text-slate-600">Ulaşım türü “Otobüs”e benziyor ama farklı yazılmış. Otobüs olarak kabul etmek için işaretleyin.</p>
           {typo.map((r) => (
             <RowToggle key={r.rowNumber} row={r} on={selected.has(r.rowNumber)} onChange={(on) => toggle(r.rowNumber, on)} label="Otobüs olarak kabul et" />
-          ))}
-        </Section>
-      )}
-
-      {other.length > 0 && (
-        <Section title="Farklı ulaşım türü (ör. SPRİNTER)" count={other.length} defaultOpen>
-          <p className="text-sm text-slate-600">Bu kayıtlar otomatik dahil edilmez. Otobüsünüze binebilecekse işaretleyin.</p>
-          <GroupToggle rows={other} selected={selected} setMany={setMany} />
-          {other.map((r) => (
-            <RowToggle key={r.rowNumber} row={r} on={selected.has(r.rowNumber)} onChange={(on) => toggle(r.rowNumber, on)} label="Dahil et" />
-          ))}
-        </Section>
-      )}
-
-      {unknown.length > 0 && (
-        <Section title="Katılacak, ulaşımı belirsiz" count={unknown.length}>
-          <p className="text-sm text-slate-600">Ulaşım boş, “BELLİ DEĞİL” veya “DÖNECEK” yazılmış. Otomatik dahil edilmez.</p>
-          <GroupToggle rows={unknown} selected={selected} setMany={setMany} />
-          {unknown.map((r) => (
-            <RowToggle key={r.rowNumber} row={r} on={selected.has(r.rowNumber)} onChange={(on) => toggle(r.rowNumber, on)} label="Dahil et" />
           ))}
         </Section>
       )}
@@ -333,15 +324,6 @@ function Review({
   );
 }
 
-function GroupToggle({ rows, selected, setMany }: { rows: ParsedRow[]; selected: Set<number>; setMany: (rows: ParsedRow[], on: boolean) => void }) {
-  const all = rows.every((r) => selected.has(r.rowNumber));
-  return (
-    <Button className="w-full text-sm" onClick={() => setMany(rows, !all)}>
-      {all ? 'Hiçbirini dahil etme' : `Tümünü dahil et (${rows.length})`}
-    </Button>
-  );
-}
-
 function RowToggle({ row, on, onChange, label }: { row: ParsedRow; on: boolean; onChange: (on: boolean) => void; label: string }) {
   return (
     <label className={`flex min-h-11 items-start gap-3 rounded-xl border p-2.5 ${on ? 'border-brand-600 bg-brand-50' : 'border-slate-200'}`}>
@@ -361,11 +343,32 @@ function RowToggle({ row, on, onChange, label }: { row: ParsedRow; on: boolean; 
 function VerifyRow({ row, value, onChange }: { row: ParsedRow; value?: RowVerification; onChange: (v: RowVerification) => void }) {
   const v = value ?? { verified: false, assignments: defaultAssignments(row) };
   const options = row.people[0]?.phoneOptions ?? [];
+  const ambiguous = row.people.some((p) => p.flags.includes('ambiguous-separator'));
   return (
     <div className={`space-y-2 rounded-xl border p-2.5 ${v.verified ? 'border-brand-600 bg-brand-50' : 'border-warn/60 bg-warn-50/50'}`} data-testid="verify-row">
       {rowTitle(row)}
       <p className="text-sm font-semibold break-words">{row.company}</p>
-      {row.people.map((p, i) => (
+      <p className="text-sm text-slate-700">
+        {v.merged ? (
+          <>Tek kişi olarak eklenecek: <b>{row.people.map((p) => p.fullName).join(' ')}</b></>
+        ) : (
+          <>
+            <b>{row.people.length} ayrı katılımcı</b> oluşturulacak (her birinin ayrı kaydı, otobüs ve yoklama durumu olur).
+          </>
+        )}
+      </p>
+      {ambiguous && (
+        <label className="flex min-h-11 items-center gap-2 rounded-lg bg-white px-2 text-sm font-semibold">
+          <input
+            type="checkbox"
+            className="h-6 w-6 accent-brand-600"
+            checked={!!v.merged}
+            onChange={(e) => onChange({ ...v, merged: e.target.checked, verified: true })}
+          />
+          Bu bir kişinin adı soyadı (bölünmesin)
+        </label>
+      )}
+      {!v.merged && row.people.map((p, i) => (
         <label key={p.sourceKey} className="block">
           <span className="block font-bold break-words">
             {p.fullName}
@@ -376,7 +379,7 @@ function VerifyRow({ row, value, onChange }: { row: ParsedRow; value?: RowVerifi
             onChange={(e) => {
               const assignments = [...v.assignments];
               assignments[i] = e.target.value;
-              onChange({ verified: true, assignments });
+              onChange({ verified: true, assignments, merged: false });
             }}
             className="mt-1 h-11 w-full rounded-lg border border-slate-300 bg-white px-2 tabular-nums"
             aria-label={`${p.fullName} telefon numarası`}
@@ -386,7 +389,7 @@ function VerifyRow({ row, value, onChange }: { row: ParsedRow; value?: RowVerifi
                 {formatPhone(o)}
               </option>
             ))}
-            {options.length > 0 && <option value={SHARED}>Ortak irtibat (kişiye atanmamış)</option>}
+            {options.length > 0 && <option value={SHARED}>Ortak irtibat</option>}
             <option value={NONE}>Telefon yok</option>
           </select>
           <span className="mt-0.5 block text-xs text-[#8a5a12]">{p.flags.filter((f) => f !== 'boarding-unknown').map((f) => FLAG_LABELS[f]).join(' · ')}</span>
@@ -401,16 +404,35 @@ function VerifyRow({ row, value, onChange }: { row: ParsedRow; value?: RowVerifi
 }
 
 function fmt(field: keyof ImportSnapshot, s: ImportSnapshot) {
-  if (field === 'sharedPhones') return s.sharedPhones.map(formatPhone).join(' / ') || '—';
+  if (field === 'sharedPhones' || field === 'extraPhones') return (s[field] ?? []).map(formatPhone).join(' / ') || '—';
   if (field === 'phone') return s.phone ? formatPhone(s.phone) : '—';
   return s[field] || '—';
 }
 
-function PlanView({ plan, decisions, setDecisions }: { plan: ImportPlan; decisions: Decisions; setDecisions: (d: Decisions) => void }) {
+function PlanView({
+  plan,
+  decisions,
+  setDecisions,
+  removals,
+  setRemovals,
+}: {
+  plan: ImportPlan;
+  decisions: Decisions;
+  setDecisions: (d: Decisions) => void;
+  removals: Set<string>;
+  setRemovals: (s: Set<string>) => void;
+}) {
   const count = (k: string) => plan.items.filter((i) => i.kind === k).length;
   const conflicts = plan.items.filter((i) => i.kind === 'conflict');
   const dups = plan.items.filter((i) => i.kind === 'duplicate');
   const deleted = plan.items.filter((i) => i.kind === 'deleted');
+  const toggleRemoval = (id: string, on: boolean) => {
+    const next = new Set(removals);
+    if (on) next.add(id);
+    else next.delete(id);
+    setRemovals(next);
+  };
+  const onBusMissing = plan.missing.filter((m) => m.onBus);
   const set = (key: string, val: Decisions extends Map<string, infer V> ? V : never) => setDecisions(new Map(decisions).set(key, val));
   return (
     <div className="space-y-3">
@@ -424,9 +446,57 @@ function PlanView({ plan, decisions, setDecisions }: { plan: ImportPlan; decisio
         <Stat label="Değişmeyen" value={count('unchanged')} testId="plan-unchanged" />
         <Stat label="Çakışma (onayınız gerekli)" value={conflicts.length} tone="warn" />
         <Stat label="Olası mükerrer" value={dups.length} tone="warn" />
-        <Stat label="Yeni Excel’de olmayan (silinmez)" value={plan.missing.length} />
+        <Stat label="Artık otobüs katılımcısı değil" value={plan.missing.length} tone="warn" testId="plan-missing" />
+        <Stat label="Aktif listeden çıkarılacak" value={removals.size} testId="plan-remove" />
+        <Stat label="Yeniden eklenecek" value={count('reactivate')} />
         <Stat label="Daha önce silinmiş (geri eklenmez)" value={deleted.length} testId="plan-deleted" />
       </div>
+
+      {plan.missing.length > 0 && (
+        <Section title="Yeni Excel’e göre artık otobüsle gelmeyenler" count={plan.missing.length} defaultOpen tone="warn">
+          <p className="text-sm text-slate-600">
+            Bu kişiler önceki Excel’den alınmıştı; yeni dosyada sarı işaretli, otobüs dışı ulaşım veya listede yok. İşaretli olanlar aktif katılımcı listesinden
+            {onBusMissing.length > 0 && ' ve otobüsünüzden'} çıkarılır. Kayıtları silinmez; geçmiş yoklamalar korunur, Ayarlar’dan geri getirilebilir.
+          </p>
+          {onBusMissing.length > 0 && (
+            <p className="flex gap-2 rounded-lg bg-warn-50 p-2 text-sm font-semibold text-[#6b4510]">
+              <AlertTriangle className="h-5 w-5 shrink-0" /> {onBusMissing.length} kişi şu an otobüs listenizde. Çıkarmak için ayrıca işaretleyin.
+            </p>
+          )}
+          <div className="grid grid-cols-2 gap-2">
+            <Button className="text-sm" onClick={() => setRemovals(new Set(plan.missing.map((m) => m.person.id)))}>
+              Hepsini çıkar
+            </Button>
+            <Button className="text-sm" onClick={() => setRemovals(new Set())}>
+              Hiçbirini çıkarma
+            </Button>
+          </div>
+          {plan.missing.map((m) => (
+            <label
+              key={m.person.id}
+              data-testid="missing-row"
+              className={`flex min-h-11 items-start gap-3 rounded-xl border p-2.5 ${m.onBus ? 'border-warn bg-warn-50/60' : 'border-slate-200'}`}
+            >
+              <input
+                type="checkbox"
+                className="mt-0.5 h-6 w-6 shrink-0 accent-brand-600"
+                checked={removals.has(m.person.id)}
+                onChange={(e) => toggleRemoval(m.person.id, e.target.checked)}
+                aria-label={`${m.person.fullName} aktif listeden çıkarılsın`}
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block font-bold break-words">{m.person.fullName}</span>
+                <span className="block text-sm break-words text-slate-600">{m.person.company}</span>
+                <span className="block text-xs font-semibold text-[#8a5a12]">
+                  {m.reason}
+                  {m.onBus && ' · OTOBÜS LİSTENİZDE'}
+                  {m.person.edited && ' · elle düzenlenmiş'}
+                </span>
+              </span>
+            </label>
+          ))}
+        </Section>
+      )}
 
       {deleted.length > 0 && (
         <Section title="Daha önce sildiğiniz kişiler" count={deleted.length}>
@@ -501,16 +571,6 @@ function PlanView({ plan, decisions, setDecisions }: { plan: ImportPlan; decisio
         </Section>
       )}
 
-      {plan.missing.length > 0 && (
-        <Section title="Yeni Excel’de bulunmayanlar" count={plan.missing.length}>
-          <p className="text-sm text-slate-600">Bu kişiler silinmez; “Son Excel’de yok” etiketiyle işaretlenir.</p>
-          {plan.missing.map((p) => (
-            <p key={p.id} className="text-sm">
-              {p.fullName} <span className="text-slate-500">· {p.company}</span>
-            </p>
-          ))}
-        </Section>
-      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import type { Flag, ImportSnapshot, Person } from '../../types';
 import { db } from '../db';
-import type { ParsedPerson, ParsedRow, ParseResult } from '../excel/parse';
+import { CATEGORY_REASON, type ParsedPerson, type ParsedRow, type ParseResult } from '../excel/parse';
 import { guarded } from '../notify';
 import { saveSnapshot, uid } from '../repo';
 import { digitsOnly, foldTr } from '../text';
@@ -13,6 +13,8 @@ export interface RowVerification {
   verified: boolean;
   /** Her kişi için: numara | SHARED | NONE */
   assignments: string[];
+  /** Ayrılan parçalar aslında tek kişinin adı soyadıysa (ör. "AHMET / YILMAZ") birleştir. */
+  merged?: boolean;
 }
 
 export function defaultAssignments(row: ParsedRow): string[] {
@@ -22,16 +24,39 @@ export function defaultAssignments(row: ParsedRow): string[] {
 /** Kullanıcının eşleştirme seçimlerini kişilere uygular. */
 export function applyVerification(row: ParsedRow, v: RowVerification | undefined): ParsedPerson[] {
   if (!v) return row.people.map((p) => ({ ...p, flags: [...p.flags] }));
+  const options = row.people[0]?.phoneOptions ?? [];
+  if (v.merged && row.people.length > 1) {
+    // Tek kişi: tüm parçalar tek ad soyad, tüm numaralar o kişinin.
+    const first = row.people[0];
+    const fullName = row.people.map((p) => p.fullName).join(' ');
+    const flags: Flag[] = first.flags.filter(
+      (f) => !['missing-phone', 'shared-phone', 'extra-phone', 'pairing-unverified', 'ambiguous-separator'].includes(f),
+    );
+    if (options.length > 1) flags.push('extra-phone');
+    if (!options.length) flags.push('missing-phone');
+    return [
+      {
+        ...first,
+        fullName,
+        role: row.people.map((p) => p.role).filter(Boolean).join(', '),
+        sourceKey: `${row.companyKey}|${foldTr(fullName)}`,
+        phone: options[0] ?? '',
+        extraPhones: options.slice(1),
+        sharedPhones: [],
+        flags,
+      },
+    ];
+  }
   const assigned = new Set(v.assignments.filter((a) => a !== SHARED && a !== NONE));
-  const leftover = (row.people[0]?.phoneOptions ?? []).filter((ph) => !assigned.has(ph));
+  const leftover = options.filter((ph) => !assigned.has(ph));
   return row.people.map((p, i) => {
     const a = v.assignments[i] ?? NONE;
     const phone = a === SHARED || a === NONE ? '' : a;
     const sharedPhones = a === SHARED ? leftover : [];
-    let flags: Flag[] = p.flags.filter((f) => !['missing-phone', 'shared-phone', 'extra-phone'].includes(f));
+    let flags: Flag[] = p.flags.filter((f) => !['missing-phone', 'shared-phone'].includes(f));
     if (v.verified) flags = flags.filter((f) => f !== 'pairing-unverified' && f !== 'ambiguous-separator');
     if (sharedPhones.length) flags.push('shared-phone');
-    if (!phone && !sharedPhones.length) flags.push('missing-phone');
+    if (!phone && !sharedPhones.length && !p.extraPhones.length) flags.push('missing-phone');
     return { ...p, phone, sharedPhones, flags };
   });
 }
@@ -50,17 +75,27 @@ export type PlanItem =
   | { kind: 'conflict'; incoming: IncomingPerson; existing: Person; changes: (keyof ImportSnapshot)[] }
   | { kind: 'duplicate'; incoming: IncomingPerson; candidates: Person[] }
   /** Kullanıcı bu kişiyi daha önce silmiş: otomatik olarak geri eklenmez. */
-  | { kind: 'deleted'; incoming: IncomingPerson; existing: Person };
+  | { kind: 'deleted'; incoming: IncomingPerson; existing: Person }
+  /** Önceki bir Excel güncellemesiyle çıkarılmıştı, şimdi yine otobüsle geliyor: geri alınır. */
+  | { kind: 'reactivate'; incoming: IncomingPerson; existing: Person };
+
+/** Daha önce Excel'den gelen ama yeni dosyada artık otobüs katılımcısı olmayan kişi. */
+export interface MissingEntry {
+  person: Person;
+  /** Yeni Excel'deki durumu: "Sarı işaretli satır", "Kendi aracıyla gelecek" vb. */
+  reason: string;
+  onBus: boolean;
+}
 
 export interface ImportPlan {
   items: PlanItem[];
-  /** Daha önce Excel'den gelen ama yeni dosyada olmayan kişiler (silinmez, işaretlenir). */
-  missing: Person[];
+  missing: MissingEntry[];
 }
 
 export const FIELD_LABELS: Record<keyof ImportSnapshot, string> = {
   fullName: 'Ad soyad',
   phone: 'Telefon',
+  extraPhones: 'Ek telefon',
   sharedPhones: 'Ortak irtibat',
   company: 'Firma',
   boardingPlace: 'Biniş yeri',
@@ -85,6 +120,7 @@ export function toIncoming(result: ParseResult, selected: Set<number>, verificat
         snapshot: {
           fullName: person.fullName,
           phone: person.phone,
+          extraPhones: person.extraPhones,
           sharedPhones: person.sharedPhones,
           company: row.company,
           boardingPlace: row.boarding,
@@ -95,17 +131,47 @@ export function toIncoming(result: ParseResult, selected: Set<number>, verificat
   return out;
 }
 
+const SNAP_KEYS: (keyof ImportSnapshot)[] = ['fullName', 'phone', 'extraPhones', 'sharedPhones', 'company', 'boardingPlace'];
+
 function diff(a: ImportSnapshot, b: ImportSnapshot): (keyof ImportSnapshot)[] {
-  const keys: (keyof ImportSnapshot)[] = ['fullName', 'phone', 'sharedPhones', 'company', 'boardingPlace'];
-  return keys.filter((k) => (k === 'sharedPhones' ? a[k].join('|') !== b[k].join('|') : a[k] !== b[k]));
+  return SNAP_KEYS.filter((k) => {
+    const x = a[k] ?? [];
+    const y = b[k] ?? [];
+    return Array.isArray(x) || Array.isArray(y) ? [x].flat().join('|') !== [y].flat().join('|') : x !== y;
+  });
 }
 
 function current(p: Person): ImportSnapshot {
-  return { fullName: p.fullName, phone: p.phone, sharedPhones: p.sharedPhones, company: p.company, boardingPlace: p.boardingPlace };
+  return {
+    fullName: p.fullName,
+    phone: p.phone,
+    extraPhones: p.extraPhones ?? [],
+    sharedPhones: p.sharedPhones,
+    company: p.company,
+    boardingPlace: p.boardingPlace,
+  };
+}
+
+/** Yeni dosyada kişinin neden artık alınmadığını bulur (sarı, KENDİ, SPRİNTER, yok…). */
+function exclusionReasons(result: ParseResult | undefined, selected: Set<number> | undefined): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!result) return map;
+  for (const row of result.rows) {
+    const reason = row.category === 'excluded' ? row.excludeReason : !selected?.has(row.rowNumber) ? CATEGORY_REASON[row.category] : '';
+    if (!reason) continue;
+    for (const p of row.people) map.set(`${row.companyKey}|${foldTr(p.fullName)}`, reason);
+  }
+  return map;
+}
+
+export interface PlanContext {
+  result?: ParseResult;
+  selected?: Set<number>;
+  busIds?: Set<string>;
 }
 
 /** Yeni Excel verisini mevcut kayıtlarla karşılaştırır; hiçbir şeyi değiştirmez. */
-export function planImport(incoming: IncomingPerson[], existing: Person[]): ImportPlan {
+export function planImport(incoming: IncomingPerson[], existing: Person[], ctx: PlanContext = {}): ImportPlan {
   const bySource = new Map(existing.filter((p) => p.sourceKey).map((p) => [p.sourceKey!, p]));
   const manual = existing.filter((p) => !p.sourceKey && !p.deletedAt);
   const seen = new Set<string>();
@@ -116,7 +182,7 @@ export function planImport(incoming: IncomingPerson[], existing: Person[]): Impo
     const ex = bySource.get(key);
     if (!ex) {
       const name = foldTr(inc.person.fullName);
-      const phones = [inc.person.phone, ...inc.person.sharedPhones].map(digitsOnly).filter(Boolean);
+      const phones = [inc.person.phone, ...inc.person.extraPhones, ...inc.person.sharedPhones].map(digitsOnly).filter(Boolean);
       const candidates = manual.filter(
         (m) => foldTr(m.fullName) === name || (m.phone && phones.includes(digitsOnly(m.phone)) && foldTr(m.fullName).split(' ')[0] === name.split(' ')[0]),
       );
@@ -124,7 +190,7 @@ export function planImport(incoming: IncomingPerson[], existing: Person[]): Impo
       continue;
     }
     if (ex.deletedAt) {
-      items.push({ kind: 'deleted', incoming: inc, existing: ex });
+      items.push(ex.removedBy === 'import' ? { kind: 'reactivate', incoming: inc, existing: ex } : { kind: 'deleted', incoming: inc, existing: ex });
       continue;
     }
     const excelChanges = ex.importSnapshot ? diff(ex.importSnapshot, inc.snapshot) : diff(current(ex), inc.snapshot);
@@ -133,8 +199,20 @@ export function planImport(incoming: IncomingPerson[], existing: Person[]): Impo
     else if (ex.edited) items.push({ kind: 'conflict', incoming: inc, existing: ex, changes: vsCurrent });
     else items.push({ kind: 'update', incoming: inc, existing: ex, changes: vsCurrent });
   }
-  const missing = existing.filter((p) => p.source === 'excel' && p.sourceKey && !p.deletedAt && !seen.has(p.sourceKey));
+  const reasons = exclusionReasons(ctx.result, ctx.selected);
+  const missing = existing
+    .filter((p) => p.source === 'excel' && p.sourceKey && !p.deletedAt && !seen.has(p.sourceKey))
+    .map((person) => ({
+      person,
+      reason: reasons.get(person.sourceKey!) ?? 'Yeni Excel’de bulunamadı',
+      onBus: !!ctx.busIds?.has(person.id),
+    }));
   return { items, missing };
+}
+
+/** Varsayılan: otobüste olmayanlar aktif listeden çıkarılır; otobüstekiler açık onay ister. */
+export function defaultRemovals(plan: ImportPlan): Set<string> {
+  return new Set(plan.missing.filter((m) => !m.onBus).map((m) => m.person.id));
 }
 
 /** Çakışma/mükerrer kararları: kayıt anahtarı → seçim. */
@@ -147,8 +225,13 @@ export interface ApplyResult {
   conflictsKept: number;
   conflictsReplaced: number;
   linked: number;
+  /** Yeni Excel'de olmayan ama kullanıcı çıkarmayı seçmediği için listede kalanlar. */
   markedMissing: number;
-  /** Daha önce silindiği için geri eklenmeyen kişiler. */
+  /** Yeni Excel'e göre aktif listeden çıkarılanlar (otobüsten de). */
+  removed: number;
+  /** Önceki güncellemede çıkarılıp şimdi yeniden otobüsle gelenler. */
+  reactivated: number;
+  /** Daha önce kullanıcı tarafından silindiği için geri eklenmeyen kişiler. */
   skippedDeleted: number;
   snapshotId: number;
 }
@@ -159,19 +242,24 @@ const IMPORT_FLAGS: Flag[] = [
 ];
 
 /**
- * Planı uygular. Otobüs listesi, yoklamalar ve manuel kişiler asla silinmez.
- * İşlemden önce mevcut verilerin anlık kopyası alınır.
+ * Planı uygular. Manuel kişiler, kullanıcı düzenlemeleri ve yoklama geçmişi korunur.
+ * `removals` içindeki kişiler aktif listeden ve otobüsten çıkarılır (kayıt silinmez,
+ * işaretlenir). İşlemden önce mevcut verilerin anlık kopyası alınır.
  */
-export async function applyImport(plan: ImportPlan, decisions: Decisions, fileName: string): Promise<ApplyResult> {
+export async function applyImport(plan: ImportPlan, decisions: Decisions, fileName: string, removals: Set<string> = new Set()): Promise<ApplyResult> {
   const snapshotId = await guarded('Excel öncesi kopya', () => saveSnapshot(`Excel yükleme öncesi otomatik kopya (${fileName})`));
-  const res: ApplyResult = { created: 0, updated: 0, unchanged: 0, conflictsKept: 0, conflictsReplaced: 0, linked: 0, markedMissing: 0, skippedDeleted: 0, snapshotId };
+  const res: ApplyResult = {
+    created: 0, updated: 0, unchanged: 0, conflictsKept: 0, conflictsReplaced: 0, linked: 0,
+    markedMissing: 0, removed: 0, reactivated: 0, skippedDeleted: 0, snapshotId,
+  };
   const now = Date.now();
   await guarded('Excel içe aktarma', () =>
-    db.transaction('rw', db.persons, db.settings, async () => {
+    db.transaction('rw', db.persons, db.bus, db.settings, async () => {
       const fromExcel = (inc: IncomingPerson, existing?: Person): Person => ({
         id: existing?.id ?? uid(),
         fullName: inc.snapshot.fullName,
         phone: inc.snapshot.phone,
+        extraPhones: inc.snapshot.extraPhones ?? [],
         sharedPhones: inc.snapshot.sharedPhones,
         company: inc.snapshot.company,
         companyKey: inc.row.companyKey,
@@ -192,6 +280,9 @@ export async function applyImport(plan: ImportPlan, decisions: Decisions, fileNa
         const key = item.incoming.person.sourceKey;
         if (item.kind === 'deleted') {
           res.skippedDeleted++;
+        } else if (item.kind === 'reactivate') {
+          await db.persons.put(fromExcel(item.incoming, { ...item.existing, edited: false }));
+          res.reactivated++;
         } else if (item.kind === 'new') {
           await db.persons.add(fromExcel(item.incoming));
           res.created++;
@@ -240,15 +331,21 @@ export async function applyImport(plan: ImportPlan, decisions: Decisions, fileNa
           res.created++;
         }
       }
-      for (const p of plan.missing) {
-        if (!p.flags.includes('missing-from-latest-import')) {
-          await db.persons.update(p.id, { flags: [...p.flags, 'missing-from-latest-import'] });
+      for (const m of plan.missing) {
+        if (removals.has(m.person.id)) {
+          await db.bus.delete(m.person.id);
+          await db.persons.update(m.person.id, { deletedAt: now, removedBy: 'import', removedReason: m.reason, updatedAt: now });
+          res.removed++;
+        } else {
+          if (!m.person.flags.includes('missing-from-latest-import')) {
+            await db.persons.update(m.person.id, { flags: [...m.person.flags, 'missing-from-latest-import'] });
+          }
+          res.markedMissing++;
         }
-        res.markedMissing++;
       }
       await db.settings.put({
         key: 'lastImport',
-        value: { at: now, fileName, people: plan.items.length },
+        value: { at: now, fileName, people: plan.items.filter((i) => i.kind !== 'deleted').length },
       });
     }),
   );

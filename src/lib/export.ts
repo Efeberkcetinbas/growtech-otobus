@@ -1,10 +1,11 @@
 import type { BusEntry } from '../hooks/useAppData';
 import type { AttendanceCheck, AttendanceSession } from '../types';
+import { contactText } from './person';
 import { formatPhone } from './phone';
 
 export function listToText(entries: BusEntry[], title = 'GROWTECH 2026 – Otobüs listem'): string {
   const lines = entries.map(({ person: p }, i) => {
-    const phone = p.phone ? formatPhone(p.phone) : p.sharedPhones.length ? `Ortak: ${p.sharedPhones.map(formatPhone).join(' / ')}` : 'Tel yok';
+    const phone = contactText(p);
     return [`${i + 1}. ${p.fullName}`, phone, p.company, p.boardingPlace].filter(Boolean).join(' – ');
   });
   return `${title} (${entries.length} kişi)\n\n${lines.join('\n')}`;
@@ -37,7 +38,7 @@ export async function downloadBusExcel(entries: BusEntry[], sessions: Attendance
   const rows = entries.map(({ person: p }, i) => [
     i + 1,
     p.fullName,
-    p.phone ? formatPhone(p.phone) : '',
+    [p.phone, ...(p.extraPhones ?? [])].filter(Boolean).map(formatPhone).join(' / '),
     p.sharedPhones.map(formatPhone).join(' / '),
     p.company,
     p.boardingPlace,

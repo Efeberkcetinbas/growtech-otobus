@@ -29,11 +29,27 @@ export function CallButton({ person, compact = false, labelClassName = '' }: { p
 }
 
 export function PhoneLine({ person }: { person: Person }) {
-  if (person.phone) {
+  const extras = person.extraPhones ?? [];
+  if (person.phone || extras.length) {
+    const all = [person.phone, ...extras].filter(Boolean);
     return (
-      <span className="flex items-center gap-1.5 font-semibold tabular-nums">
-        <Phone className="h-4 w-4 shrink-0 text-slate-500" aria-hidden />
-        {formatPhone(person.phone)}
+      <span className="flex items-start gap-1.5 font-semibold tabular-nums">
+        <Phone className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+        <span className="flex flex-wrap gap-x-2">
+          {all.map((n, i) => (
+            <span key={n} className="whitespace-nowrap">
+              {i > 0 ? (
+                <a href={telHref(n)} className="text-brand-600 underline underline-offset-2" aria-label={`Diğer numarayı ara: ${formatPhone(n)}`}>
+                  {formatPhone(n)}
+                </a>
+              ) : (
+                formatPhone(n)
+              )}
+              {i < all.length - 1 && <span className="text-slate-400"> /</span>}
+            </span>
+          ))}
+          {person.flags.includes('pairing-unverified') && <span className="text-xs font-semibold text-[#8a5a12]">(doğrulanmadı)</span>}
+        </span>
       </span>
     );
   }

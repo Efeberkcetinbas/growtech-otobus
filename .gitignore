@@ -34,3 +34,6 @@ tests/local/*.local.*
 .DS_Store
 Thumbs.db
 *.log
+
+# Uygulamadan üretilen PDF raporları (kişisel veri)
+*.pdf
